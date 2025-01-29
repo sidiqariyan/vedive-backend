@@ -1,74 +1,108 @@
-const express = require("express");
-const { scrapeEmails } = require("../services/scrapeService");
-const { generateCSV } = require("../utils/csvWriter");
-const pLimit = require("p-limit"); // Add rate limiting
+const axios = require("axios");
+const puppeteer = require("puppeteer");
 
-const router = express.Router();
+// Utility function for delay
+const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-router.post("/", async (req, res) => {
-  const query = req.body.query || "contact email"; // Allow dynamic query input
-  const pages = req.body.pages || 2; // Allow dynamic page input
-  const customDomains = req.body.domains || []; // Allow user to add custom domains
-  const apiKey = "AIzaSyD_nVwEodt7Mg10vbXWEKXbMVLwBCVDfJI"; // Google API key provided by the user
-  const cx = "a0280e6e13d584edb"; // Google Custom Search Engine ID
-
-  if (!apiKey || !cx) {
-    return res.status(400).json({ error: "API key and CX (Custom Search Engine ID) are required" });
-  }
-
-  const defaultDomains = [
-    "@gmail.com", "@yahoo.com", "@hotmail.com", "@icloud.com",
-    "@aol.com", "@email.com", "@protonmail.com", "@zoho.com",
-    "@gmx.com", "@mail.com", "@yandex.com", "@tutanota.com",
-    "@fastmail.com", "@sendgrid.com", "@bluehost.com",
-    "@qmail.com", "@inbox.com",
-  ];
-
-  const domains = [...new Set([...defaultDomains, ...customDomains])];
-  const domainQueries = domains.map((d) => `"${d}"`).join(" OR ");
-
-  if (!query) {
-    return res.status(400).json({ error: "Query is required" });
-  }
-
-  try {
-    console.log("Scraping process started...");
-    const sites = req.body.sites || ["google.com", "instagram.com"];
-    
-    const limit = pLimit(1); // Allow only 1 request at a time
-    const emailPromises = sites.map((site) =>
-      limit(() =>
-        scrapeEmails(`${query} (${domainQueries})`, [site], apiKey, cx, pages).catch((err) => {
-          if (err.response && err.response.status === 429) {
-            console.error(`Rate limit hit for site: ${site}. Retrying with backoff.`);
-            return null; // Handle retries if necessary
-          }
-          throw err;
-        })
-      )
-    );
-
-    const emailResults = await Promise.all(emailPromises);
-    const emails = emailResults.flat().filter(Boolean);
-
-    if (emails.length === 0) {
-      return res.status(404).json({ message: "No emails found" });
-    }
-
-    const csvPath = await generateCSV(emails);
-
-    res.setHeader("Content-Type", "application/octet-stream");
-    res.setHeader("Content-Disposition", "attachment; filename=emails.csv");
-    res.sendFile(csvPath, (err) => {
-      if (err) {
-        console.error("Error in downloading file:", err);
-        return res.status(500).json({ error: "Error downloading the file." });
+// Retry mechanism with exponential backoff
+const fetchWithRetry = async (url, retries = 3, delayMs = 2000) => {
+  for (let i = 0; i < retries; i++) {
+    try {
+      const response = await axios.get(url);
+      return response;
+    } catch (error) {
+      if (error.response && error.response.status === 429 && i < retries - 1) {
+        console.log(`Rate limit hit. Retrying in ${delayMs}ms...`);
+        await delay(delayMs);
+        delayMs *= 2; // Exponential backoff
+      } else {
+        throw error;
       }
-    });
-  } catch (error) {
-    console.error("Error during scraping:", error);
-    res.status(500).json({ error: "Something went wrong. Please try again." });
+    }
   }
-});
+};
 
-module.exports = router;
+// Main function to scrape emails
+async function scrapeEmails(query, sites, apiKey, cx, pagesToScrape = 2) {
+  console.log("Starting email scraping...");
+
+  const emails = new Set();
+  const emailRegex = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g;
+  const puppeteerLinks = [];
+
+  for (const site of sites) {
+    console.log(`Scraping results for site: ${site}`);
+    for (let i = 1; i <= pagesToScrape; i++) {
+      const start = (i - 1) * 10 + 1;
+      const searchURL = `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=${cx}&q=site:${site} ${encodeURIComponent(query)}&start=${start}`;
+
+      try {
+        // Fetch search results with retries
+        const response = await fetchWithRetry(searchURL);
+        const items = response.data.items || [];
+
+        console.log(`Found ${items.length} results on page ${i}`);
+
+        for (const item of items) {
+          if (site.includes("instagram.com")) {
+            puppeteerLinks.push(item.link); // Save Instagram links for Puppeteer
+          } else {
+            try {
+              const pageResponse = await axios.get(item.link, { timeout: 5000 });
+              const pageContent = pageResponse.data;
+              const matches = pageContent.match(emailRegex);
+              if (matches) matches.forEach((email) => emails.add(email));
+            } catch (err) {
+              console.error(`Error visiting ${item.link}: ${err.message}`);
+            }
+          }
+        }
+      } catch (error) {
+        console.error(`Error fetching search results for page ${i}: ${error.message}`);
+        break; // Stop further requests if quota is exceeded
+      }
+
+      // Add a delay to avoid hitting rate limits
+      await delay(1000);
+    }
+  }
+
+  // Use Puppeteer for restricted sites like Instagram
+  if (puppeteerLinks.length > 0) {
+    console.log("Falling back to Puppeteer for restricted sites...");
+    const puppeteerEmails = await scrapeEmailsWithPuppeteer(puppeteerLinks);
+    puppeteerEmails.forEach((email) => emails.add(email));
+  }
+
+  return Array.from(emails);
+}
+
+// Puppeteer function for restricted sites
+async function scrapeEmailsWithPuppeteer(links) {
+  const emails = new Set();
+  
+  // Launch browser with options to bypass sandbox issue
+  const browser = await puppeteer.launch({
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox']
+  });
+  
+  const page = await browser.newPage();
+
+  for (const link of links) {
+    try {
+      console.log(`Visiting: ${link}`);
+      await page.goto(link, { waitUntil: "domcontentloaded", timeout: 10000 });
+      const content = await page.content();
+      const matches = content.match(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g);
+      if (matches) matches.forEach((email) => emails.add(email));
+    } catch (error) {
+      console.error(`Error visiting ${link}: ${error.message}`);
+    }
+  }
+
+  await browser.close();
+  return Array.from(emails);
+}
+
+module.exports = { scrapeEmails };
