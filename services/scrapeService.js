@@ -23,7 +23,7 @@ const fetchWithRetry = async (url, retries = 3, delayMs = 2000) => {
 };
 
 // Main function to scrape emails
-async function scrapeEmails(query, sites, apiKey, cx, pagesToScrape = 2) {
+async function scrapeEmails(query, sites, apiKey, cx, pagesToScrape = 5) {
   console.log("Starting email scraping...");
 
   const emails = new Set();
