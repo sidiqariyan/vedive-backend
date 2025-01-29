@@ -80,7 +80,13 @@ async function scrapeEmails(query, sites, apiKey, cx, pagesToScrape = 2) {
 // Puppeteer function for restricted sites
 async function scrapeEmailsWithPuppeteer(links) {
   const emails = new Set();
-  const browser = await puppeteer.launch({ headless: true });
+  
+  // Launch browser with options to bypass sandbox issue
+  const browser = await puppeteer.launch({
+    headless: true,
+    args: ['--no-sandbox', '--disable-setuid-sandbox']
+  });
+  
   const page = await browser.newPage();
 
   for (const link of links) {
