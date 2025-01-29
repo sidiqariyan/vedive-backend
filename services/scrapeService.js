@@ -22,7 +22,7 @@ const fetchWithRetry = async (url, retries = 3, delayMs = 2000) => {
   }
 };
 
-// **Make sure scrapeEmails is correctly defined**
+// Main function to scrape emails
 async function scrapeEmails(query, sites, apiKey, cx, pagesToScrape = 2) {
   console.log("Starting email scraping...");
 
@@ -80,21 +80,7 @@ async function scrapeEmails(query, sites, apiKey, cx, pagesToScrape = 2) {
 // Puppeteer function for restricted sites
 async function scrapeEmailsWithPuppeteer(links) {
   const emails = new Set();
-  
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: [
-      '--no-sandbox',
-      '--disable-setuid-sandbox',
-      '--disable-dev-shm-usage',
-      '--disable-accelerated-2d-canvas',
-      '--no-first-run',
-      '--no-zygote',
-      '--single-process'
-    ],
-    executablePath: process.env.CHROMIUM_PATH || puppeteer.executablePath()
-  });
-
+  const browser = await puppeteer.launch({ headless: true });
   const page = await browser.newPage();
 
   for (const link of links) {
@@ -113,5 +99,4 @@ async function scrapeEmailsWithPuppeteer(links) {
   return Array.from(emails);
 }
 
-// **Ensure scrapeEmails is exported correctly**
 module.exports = { scrapeEmails };
