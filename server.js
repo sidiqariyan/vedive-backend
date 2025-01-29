@@ -13,7 +13,7 @@ const gmailSender = require("./routes/gmailSender");
 
 const app = express();
 const upload = multer({ dest: "uploads/" });
-const PORT = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3001;
 const wss = new WebSocket.Server({ noServer: true });
 
 app.use(cors());
