@@ -1,19 +1,19 @@
 const express = require("express");
 const { scrapeEmails } = require("../services/scrapeService");
 const { generateCSV } = require("../utils/csvWriter");
-const pLimit = require("p-limit"); // Rate limiting
+const pLimit = require("p-limit"); // Add rate limiting
 
 const router = express.Router();
 
 router.post("/", async (req, res) => {
-  const query = req.body.query || "contact email";
-  const pages = req.body.pages || 2;
-  const customDomains = req.body.domains || [];
-  const apiKey = process.env.GOOGLE_API_KEY;
-  const cx = process.env.GOOGLE_CX;
+  const query = req.body.query || "contact email"; // Allow dynamic query input
+  const pages = req.body.pages || 2; // Allow dynamic page input
+  const customDomains = req.body.domains || []; // Allow user to add custom domains
+  const apiKey = "AIzaSyD_nVwEodt7Mg10vbXWEKXbMVLwBCVDfJI"; // Google API key provided by the user
+  const cx = "a0280e6e13d584edb"; // Google Custom Search Engine ID
 
   if (!apiKey || !cx) {
-    return res.status(400).json({ error: "Missing API key or CX ID." });
+    return res.status(400).json({ error: "API key and CX (Custom Search Engine ID) are required" });
   }
 
   const defaultDomains = [
@@ -28,36 +28,35 @@ router.post("/", async (req, res) => {
   const domainQueries = domains.map((d) => `"${d}"`).join(" OR ");
 
   if (!query) {
-    return res.status(400).json({ error: "Query is required." });
+    return res.status(400).json({ error: "Query is required" });
   }
 
   try {
     console.log("Scraping process started...");
     const sites = req.body.sites || ["google.com", "instagram.com"];
-    const limit = pLimit(1); // Limit to 1 request at a time
-
+    
+    const limit = pLimit(1); // Allow only 1 request at a time
     const emailPromises = sites.map((site) =>
-      limit(async () => {
-        try {
-          return await scrapeEmails(`${query} (${domainQueries})`, [site], apiKey, cx, pages);
-        } catch (err) {
+      limit(() =>
+        scrapeEmails(`${query} (${domainQueries})`, [site], apiKey, cx, pages).catch((err) => {
           if (err.response && err.response.status === 429) {
             console.error(`Rate limit hit for site: ${site}. Retrying with backoff.`);
-            return [];
+            return null; // Handle retries if necessary
           }
           throw err;
-        }
-      })
+        })
+      )
     );
 
     const emailResults = await Promise.all(emailPromises);
     const emails = emailResults.flat().filter(Boolean);
 
     if (emails.length === 0) {
-      return res.status(404).json({ message: "No emails found." });
+      return res.status(404).json({ message: "No emails found" });
     }
 
     const csvPath = await generateCSV(emails);
+
     res.setHeader("Content-Type", "application/octet-stream");
     res.setHeader("Content-Disposition", "attachment; filename=emails.csv");
     res.sendFile(csvPath, (err) => {
