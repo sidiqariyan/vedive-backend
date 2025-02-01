@@ -6,7 +6,7 @@ const path = require("path");
 const xlsx = require("xlsx");
 const WebSocket = require("ws");
 const nodemailer = require("nodemailer");
-const { Client, LocalAuth, MessageMedia } = require("whatsapp-web.js");
+const { Client, LocalAuth } = require("whatsapp-web.js");
 const qrcode = require("qrcode");
 
 const scraper = require("./scraper");
@@ -18,7 +18,7 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 const server = require("http").createServer(app);
 
-// WebSocket server should be initialized here without explicitly defining 'upgrade' event
+// WebSocket server
 const wss = new WebSocket.Server({ server });
 
 app.use(cors());
@@ -31,6 +31,7 @@ const client = new Client({
   puppeteer: { args: ["--no-sandbox", "--disable-setuid-sandbox"] },
 });
 
+// Handle QR Code generation for WhatsApp Web authentication
 client.on("qr", (qr) => {
   qrcode.toDataURL(qr, (err, url) => {
     if (!err) {
@@ -44,6 +45,7 @@ client.on("qr", (qr) => {
 });
 
 client.on("ready", () => {
+  console.log("WhatsApp Client is ready!");
   wss.clients.forEach((ws) => {
     if (ws.readyState === WebSocket.OPEN) {
       ws.send(JSON.stringify({ status: "WhatsApp Client is ready!" }));
@@ -53,6 +55,7 @@ client.on("ready", () => {
 
 client.initialize();
 
+// Multer setup for file uploads
 const storage = multer.diskStorage({
   destination: "./uploads/",
   filename: (req, file, cb) => {
@@ -61,50 +64,44 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
-app.post("/upload", upload.fields([{ name: "messageFile" }, { name: "contactsFile" }, { name: "mediaFile" }]), async (req, res) => {
+app.post("/upload", upload.fields([{ name: "messageFile" }, { name: "contactsFile" }, { name: "mediaFile" }]), (req, res) => {
+  res.json({ message: "Files uploaded successfully!" });
+});
+
+// Bulk WhatsApp message sending
+app.post("/api/send-whatsapp", async (req, res) => {
   try {
-    const { messageFile, contactsFile, mediaFile } = req.files;
-    
-    if (!messageFile || !contactsFile) {
-      return res.status(400).send("Message file and contacts file are required.");
+    const { contacts, message, mediaUrl } = req.body;
+
+    if (!contacts || !message) {
+      return res.status(400).json({ error: "Contacts and message are required!" });
     }
 
-    // Read the message file (messageFile is expected to be a .txt file)
-    const message = fs.readFileSync(messageFile[0].path, "utf-8");
+    console.log("Processing WhatsApp messages...");
 
-    // Read the contacts file (contactsFile is expected to be an .xlsx file)
-    const contactsData = fs.readFileSync(contactsFile[0].path);
-    const workbook = xlsx.read(contactsData, { type: "buffer" });
-    const sheetName = workbook.SheetNames[0];
-    const sheet = workbook.Sheets[sheetName];
-    const contacts = xlsx.utils.sheet_to_json(sheet);
-    
-    const phoneNumbers = contacts.map((contact) => contact.phoneNumber); // Assuming your contacts file has a 'phoneNumber' field
+    // Validate and format phone numbers
+    const phoneNumbers = contacts
+      .map((contact) => contact.phoneNumber)
+      .filter((number) => number && /^\d+$/.test(number)) // Ensure it's a valid number
+      .map((number) => number.startsWith("+") ? number : `+${number}`) // Ensure it has the country code
+      .map((number) => `${number.replace(/\D/g, "")}@c.us`); // Convert to WhatsApp format
 
-    // Handle media file (if any)
-    let media = null;
-    if (mediaFile) {
-      const mediaPath = path.join(__dirname, "uploads", mediaFile[0].filename);
-      media = MessageMedia.fromFilePath(mediaPath); // Upload the media to WhatsApp
-    }
+    console.log("Formatted phone numbers:", phoneNumbers);
 
-    // Send messages to contacts
+    // Send messages
     for (const phoneNumber of phoneNumbers) {
-      const number = `+${phoneNumber}@c.us`; // WhatsApp number format
       try {
-        await client.sendMessage(number, message, { media });
+        await client.sendMessage(phoneNumber, message, { media: mediaUrl });
         console.log(`Message sent to ${phoneNumber}`);
       } catch (error) {
         console.error(`Failed to send message to ${phoneNumber}:`, error);
       }
     }
 
-    // Respond to frontend
-    res.json({ message: "Messages sent successfully!" });
-
+    res.json({ success: true, message: "Messages sent successfully!" });
   } catch (error) {
-    console.error("Error in upload route:", error);
-    res.status(500).send("Error sending messages. Check logs for details.");
+    console.error("Error sending WhatsApp messages:", error);
+    res.status(500).json({ error: "Internal server error" });
   }
 });
 
@@ -162,7 +159,6 @@ app.post(
           console.log(`Email sent to ${recipient}`);
         } catch (err) {
           console.error(`Failed to send email to ${recipient}:`, err);
-          return res.status(500).send(`Failed to send email to ${recipient}: ${err.message}`);
         }
       }
 
