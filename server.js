@@ -166,7 +166,7 @@ app.get("/api/download", (req, res) => {
 // Email scraper route
 app.use("/api/email-scraper", emailScraper);
 
-// Handle WebSocket upgrades
+// Handle WebSocket upgrades (This is done only once)
 server.on("upgrade", (req, socket, head) => {
   wss.handleUpgrade(req, socket, head, (ws) => {
     wss.emit("connection", ws, req);
@@ -179,11 +179,7 @@ app.use((err, req, res, next) => {
   res.status(500).send("Internal Server Error");
 });
 
+// Start the server
 server.listen(PORT, () => {
   console.log(`Server is running on port ${PORT}`);
-});
-server.on("upgrade", (req, socket, head) => {
-  wss.handleUpgrade(req, socket, head, (ws) => {
-    wss.emit("connection", ws, req);
-  });
 });
