@@ -95,11 +95,11 @@ const readPhoneNumbersFromXlsx = (filePath) => {
 /**
  * API to send bulk WhatsApp messages using an uploaded XLSX file.
  */
-app.post("/api/send-whatsapp", upload.single("contactsFile"), async (req, res) => {
+app.post("/api/send-whatsapp", upload.fields([{ name: "contactsFile", maxCount: 1 }]), async (req, res) => {
   try {
     const { message } = req.body;
 
-    if (!req.file) {
+    if (!req.files || !req.files.contactsFile) {
       return res.status(400).json({ error: "Contacts file is required!" });
     }
 
@@ -108,7 +108,7 @@ app.post("/api/send-whatsapp", upload.single("contactsFile"), async (req, res) =
     }
 
     // Read contacts from XLSX file
-    const phoneNumbers = readPhoneNumbersFromXlsx(req.file.path);
+    const phoneNumbers = readPhoneNumbersFromXlsx(req.files.contactsFile[0].path);
     console.log("Extracted Phone Numbers:", phoneNumbers);
 
     if (phoneNumbers.length === 0) {
@@ -126,7 +126,7 @@ app.post("/api/send-whatsapp", upload.single("contactsFile"), async (req, res) =
     }
 
     // Delete uploaded file after processing
-    fs.unlinkSync(req.file.path);
+    fs.unlinkSync(req.files.contactsFile[0].path);
 
     res.json({ success: true, message: "WhatsApp messages sent successfully!" });
   } catch (error) {
@@ -134,7 +134,6 @@ app.post("/api/send-whatsapp", upload.single("contactsFile"), async (req, res) =
     res.status(500).json({ error: "Internal server error" });
   }
 });
-
 /**
  * Bulk email sending route
  */
