@@ -6,7 +6,7 @@ const path = require("path");
 const xlsx = require("xlsx");
 const WebSocket = require("ws");
 const nodemailer = require("nodemailer");
-const { Client, LocalAuth } = require("whatsapp-web.js");
+const { Client, LocalAuth, MessageMedia } = require("whatsapp-web.js");
 const qrcode = require("qrcode");
 
 const scraper = require("./scraper");
@@ -61,8 +61,51 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
-app.post("/upload", upload.fields([{ name: "messageFile" }, { name: "contactsFile" }, { name: "mediaFile" }]), (req, res) => {
-  res.json({ message: "Files uploaded successfully!" });
+app.post("/upload", upload.fields([{ name: "messageFile" }, { name: "contactsFile" }, { name: "mediaFile" }]), async (req, res) => {
+  try {
+    const { messageFile, contactsFile, mediaFile } = req.files;
+    
+    if (!messageFile || !contactsFile) {
+      return res.status(400).send("Message file and contacts file are required.");
+    }
+
+    // Read the message file (messageFile is expected to be a .txt file)
+    const message = fs.readFileSync(messageFile[0].path, "utf-8");
+
+    // Read the contacts file (contactsFile is expected to be an .xlsx file)
+    const contactsData = fs.readFileSync(contactsFile[0].path);
+    const workbook = xlsx.read(contactsData, { type: "buffer" });
+    const sheetName = workbook.SheetNames[0];
+    const sheet = workbook.Sheets[sheetName];
+    const contacts = xlsx.utils.sheet_to_json(sheet);
+    
+    const phoneNumbers = contacts.map((contact) => contact.phoneNumber); // Assuming your contacts file has a 'phoneNumber' field
+
+    // Handle media file (if any)
+    let media = null;
+    if (mediaFile) {
+      const mediaPath = path.join(__dirname, "uploads", mediaFile[0].filename);
+      media = MessageMedia.fromFilePath(mediaPath); // Upload the media to WhatsApp
+    }
+
+    // Send messages to contacts
+    for (const phoneNumber of phoneNumbers) {
+      const number = `+${phoneNumber}@c.us`; // WhatsApp number format
+      try {
+        await client.sendMessage(number, message, { media });
+        console.log(`Message sent to ${phoneNumber}`);
+      } catch (error) {
+        console.error(`Failed to send message to ${phoneNumber}:`, error);
+      }
+    }
+
+    // Respond to frontend
+    res.json({ message: "Messages sent successfully!" });
+
+  } catch (error) {
+    console.error("Error in upload route:", error);
+    res.status(500).send("Error sending messages. Check logs for details.");
+  }
 });
 
 // Bulk email sending route
