@@ -2,46 +2,67 @@ const express = require("express");
 const multer = require("multer");
 const cors = require("cors");
 const fs = require("fs");
+const express = require("express");
+const multer = require("multer");
+const cors = require("cors");
+const fs = require("fs");
 const path = require("path");
 const xlsx = require("xlsx");
 const WebSocket = require("ws");
-const scraper = require("./scraper"); // Import the scraper module
-const { writeCsv } = require("./csvWriter"); // Import the CSV writer module
-const emailScraper = require("./routes/scraper"); // Import email scraper route
-const nodemailer = require("nodemailer"); // Import nodemailer
+const nodemailer = require("nodemailer");
+const { Client, LocalAuth } = require("whatsapp-web.js");
+const qrcode = require("qrcode");
+
+const scraper = require("./scraper");
+const { writeCsv } = require("./csvWriter");
+const emailScraper = require("./routes/scraper");
 const gmailSender = require("./routes/gmailSender");
 
 const app = express();
-const upload = multer({ dest: "uploads/" });
 const PORT = process.env.PORT || 3001;
-const wss = new WebSocket.Server({ noServer: true });
+const server = require("http").createServer(app);
+const wss = new WebSocket.Server({ server });
 
 app.use(cors());
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "public")));
-app.use((req, res, next) => {
-  console.log(`Incoming Request: ${req.method} ${req.url}`);
-  next();
-});
 app.use("/", gmailSender);
 
-// Removed WhatsApp Web JS specific code
+const client = new Client({ authStrategy: new LocalAuth() });
 
-wss.on("connection", (ws) => {
-  console.log("WebSocket connection established");
-
-  const interval = setInterval(() => {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.ping();
+client.on("qr", (qr) => {
+  qrcode.toDataURL(qr, (err, url) => {
+    if (!err) {
+      wss.clients.forEach((ws) => {
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ qr: url }));
+        }
+      });
     }
-  }, 30000);
-
-  ws.on("close", () => {
-    clearInterval(interval);
-    console.log("WebSocket connection closed");
   });
 });
 
+client.on("ready", () => {
+  wss.clients.forEach((ws) => {
+    if (ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ status: "WhatsApp Client is ready!" }));
+    }
+  });
+});
+
+client.initialize();
+
+const storage = multer.diskStorage({
+  destination: "./uploads/",
+  filename: (req, file, cb) => {
+    cb(null, Date.now() + path.extname(file.originalname));
+  },
+});
+const upload = multer({ storage });
+
+app.post("/upload", upload.fields([{ name: "messageFile" }, { name: "contactsFile" }, { name: "mediaFile" }]), (req, res) => {
+  res.json({ message: "Files uploaded successfully!" });
+});
 // Bulk email sending route
 app.post(
   "/api/send-bulk-mail",
