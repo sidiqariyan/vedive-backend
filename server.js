@@ -2,10 +2,6 @@ const express = require("express");
 const multer = require("multer");
 const cors = require("cors");
 const fs = require("fs");
-const express = require("express");
-const multer = require("multer");
-const cors = require("cors");
-const fs = require("fs");
 const path = require("path");
 const xlsx = require("xlsx");
 const WebSocket = require("ws");
@@ -63,6 +59,7 @@ const upload = multer({ storage });
 app.post("/upload", upload.fields([{ name: "messageFile" }, { name: "contactsFile" }, { name: "mediaFile" }]), (req, res) => {
   res.json({ message: "Files uploaded successfully!" });
 });
+
 // Bulk email sending route
 app.post(
   "/api/send-bulk-mail",
@@ -99,7 +96,7 @@ app.post(
       const transporter = nodemailer.createTransport({
         host: smtpHost,
         port: parseInt(smtpPort),
-        secure: smtpPort == 465,
+        secure: parseInt(smtpPort) === 465,
         auth: {
           user: smtpUsername,
           pass: smtpPassword,
@@ -116,8 +113,7 @@ app.post(
           });
           console.log(`Email sent to ${recipient}`);
         } catch (err) {
-          console.error(`Failed to send email to ${recipient}:`, err); // Log the error details
-          // Send detailed error message back to frontend
+          console.error(`Failed to send email to ${recipient}:`, err);
           return res.status(500).send(`Failed to send email to ${recipient}: ${err.message}`);
         }
       }
@@ -127,7 +123,7 @@ app.post(
 
       res.send("Bulk emails sent successfully!");
     } catch (error) {
-      console.error("Error sending bulk emails:", error); // Log the error in the backend
+      console.error("Error sending bulk emails:", error);
       res.status(500).send(`Error: ${error.message}`);
     }
   }
@@ -136,7 +132,7 @@ app.post(
 // Route to handle search and return results as JSON
 app.get("/api/search", async (req, res) => {
   const query = req.query.query;
-  let businesses = []; // Default to an empty array
+  let businesses = [];
 
   if (!query) {
     return res.status(400).send({ message: "Query is required" });
@@ -144,9 +140,9 @@ app.get("/api/search", async (req, res) => {
 
   try {
     businesses = await scraper.searchGoogleMaps(query);
-    console.log(businesses); // Log the businesses data to verify the format
-    await writeCsv(businesses); // Write the CSV file with scraped data
-    res.json(businesses); // Return businesses as JSON
+    console.log(businesses);
+    await writeCsv(businesses);
+    res.json(businesses);
   } catch (error) {
     console.error("Error while scraping data:", error);
     res.status(500).send({ message: "Error while scraping data" });
@@ -167,11 +163,19 @@ app.get("/api/download", (req, res) => {
 // Email scraper route
 app.use("/api/email-scraper", emailScraper);
 
-const server = app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-});
+// Handle WebSocket upgrades
 server.on("upgrade", (req, socket, head) => {
   wss.handleUpgrade(req, socket, head, (ws) => {
     wss.emit("connection", ws, req);
   });
+});
+
+// Global error handler
+app.use((err, req, res, next) => {
+  console.error(err.stack);
+  res.status(500).send("Internal Server Error");
+});
+
+server.listen(PORT, () => {
+  console.log(`Server is running on port ${PORT}`);
 });
