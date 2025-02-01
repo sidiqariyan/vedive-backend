@@ -62,14 +62,11 @@ const storage = multer.diskStorage({
     cb(null, Date.now() + path.extname(file.originalname));
   },
 });
+
 const upload = multer({
   storage,
   limits: { fileSize: 10 * 1024 * 1024 }, // Optional: Set file size limit (10MB)
-}).fields([
-  { name: "messageFile", maxCount: 1 },
-  { name: "contactsFile", maxCount: 1 },
-  { name: "mediaFile", maxCount: 1 },
-]);
+});
 
 /**
  * Reads phone numbers from an uploaded Excel (XLSX) file.
@@ -133,7 +130,6 @@ app.post("/api/send-whatsapp", upload.fields([{ name: "contactsFile", maxCount: 
     res.status(500).json({ error: "Internal server error" });
   }
 });
-
 
 /**
  * Bulk email sending route
