@@ -95,7 +95,7 @@ const readPhoneNumbersFromXlsx = (filePath) => {
 /**
  * API to send bulk WhatsApp messages using an uploaded XLSX file.
  */
-app.post("/api/send-whatsapp", upload.fields([{ name: "contactsFile", maxCount: 1 }]), async (req, res) => {
+app.post("/api/send-whatsapp", upload.single("contactsFile"), async (req, res) => {
   try {
     const { message } = req.body;
 
