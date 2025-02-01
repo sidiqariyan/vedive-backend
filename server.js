@@ -62,15 +62,14 @@ const storage = multer.diskStorage({
     cb(null, Date.now() + path.extname(file.originalname));
   },
 });
-const upload = multer({ 
+const upload = multer({
   storage,
-  limits: { fileSize: 10 * 1024 * 1024 } // Optional: Set file size limit (10MB)
+  limits: { fileSize: 10 * 1024 * 1024 }, // Optional: Set file size limit (10MB)
 }).fields([
   { name: "messageFile", maxCount: 1 },
   { name: "contactsFile", maxCount: 1 },
-  { name: "mediaFile", maxCount: 1 }
+  { name: "mediaFile", maxCount: 1 },
 ]);
-
 
 /**
  * Reads phone numbers from an uploaded Excel (XLSX) file.
@@ -99,7 +98,7 @@ app.post("/api/send-whatsapp", upload.single("contactsFile"), async (req, res) =
   try {
     const { message } = req.body;
 
-    if (!req.files || !req.files.contactsFile) {
+    if (!req.file || !req.file.path) {
       return res.status(400).json({ error: "Contacts file is required!" });
     }
 
@@ -108,7 +107,7 @@ app.post("/api/send-whatsapp", upload.single("contactsFile"), async (req, res) =
     }
 
     // Read contacts from XLSX file
-    const phoneNumbers = readPhoneNumbersFromXlsx(req.files.contactsFile[0].path);
+    const phoneNumbers = readPhoneNumbersFromXlsx(req.file.path);
     console.log("Extracted Phone Numbers:", phoneNumbers);
 
     if (phoneNumbers.length === 0) {
@@ -126,7 +125,7 @@ app.post("/api/send-whatsapp", upload.single("contactsFile"), async (req, res) =
     }
 
     // Delete uploaded file after processing
-    fs.unlinkSync(req.files.contactsFile[0].path);
+    fs.unlinkSync(req.file.path);
 
     res.json({ success: true, message: "WhatsApp messages sent successfully!" });
   } catch (error) {
@@ -134,6 +133,7 @@ app.post("/api/send-whatsapp", upload.single("contactsFile"), async (req, res) =
     res.status(500).json({ error: "Internal server error" });
   }
 });
+
 /**
  * Bulk email sending route
  */
