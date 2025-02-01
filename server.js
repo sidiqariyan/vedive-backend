@@ -64,54 +64,75 @@ const storage = multer.diskStorage({
 });
 const upload = multer({ storage });
 
-app.post("/upload", upload.fields([{ name: "messageFile" }, { name: "contactsFile" }, { name: "mediaFile" }]), (req, res) => {
-  res.json({ message: "Files uploaded successfully!" });
-});
+/**
+ * Reads phone numbers from an uploaded Excel (XLSX) file.
+ */
+const readPhoneNumbersFromXlsx = (filePath) => {
+  const workbook = xlsx.readFile(filePath);
+  const sheetName = workbook.SheetNames[0];
+  const sheet = workbook.Sheets[sheetName];
+  const data = xlsx.utils.sheet_to_json(sheet);
 
-// Bulk WhatsApp message sending
-app.post("/api/send-whatsapp", async (req, res) => {
+  return data.map((row) => {
+    let phone = row["Phone"] ? row["Phone"].toString().trim() : null;
+    if (phone && /^\d+$/.test(phone)) {
+      phone = phone.startsWith("+") ? phone : `+${phone}`; // Ensure country code
+      phone = phone.replace(/\D/g, ""); // Remove any non-numeric characters
+      return `${phone}@c.us`; // Convert to WhatsApp format
+    }
+    return null;
+  }).filter(Boolean);
+};
+
+/**
+ * API to send bulk WhatsApp messages using an uploaded XLSX file.
+ */
+app.post("/api/send-whatsapp", upload.single("contactsFile"), async (req, res) => {
   try {
-    const { contacts, message, mediaUrl } = req.body;
+    const { message } = req.body;
 
-    if (!contacts || !message) {
-      return res.status(400).json({ error: "Contacts and message are required!" });
+    if (!req.file) {
+      return res.status(400).json({ error: "Contacts file is required!" });
     }
 
-    console.log("Processing WhatsApp messages...");
+    if (!message) {
+      return res.status(400).json({ error: "Message content is required!" });
+    }
 
-    // Validate and format phone numbers
-    const phoneNumbers = contacts
-      .map((contact) => contact.phoneNumber)
-      .filter((number) => number && /^\d+$/.test(number)) // Ensure it's a valid number
-      .map((number) => number.startsWith("+") ? number : `+${number}`) // Ensure it has the country code
-      .map((number) => `${number.replace(/\D/g, "")}@c.us`); // Convert to WhatsApp format
+    // Read contacts from XLSX file
+    const phoneNumbers = readPhoneNumbersFromXlsx(req.file.path);
+    console.log("Extracted Phone Numbers:", phoneNumbers);
 
-    console.log("Formatted phone numbers:", phoneNumbers);
+    if (phoneNumbers.length === 0) {
+      return res.status(400).json({ error: "No valid phone numbers found in file!" });
+    }
 
     // Send messages
     for (const phoneNumber of phoneNumbers) {
       try {
-        await client.sendMessage(phoneNumber, message, { media: mediaUrl });
+        await client.sendMessage(phoneNumber, message);
         console.log(`Message sent to ${phoneNumber}`);
       } catch (error) {
         console.error(`Failed to send message to ${phoneNumber}:`, error);
       }
     }
 
-    res.json({ success: true, message: "Messages sent successfully!" });
+    // Delete uploaded file after processing
+    fs.unlinkSync(req.file.path);
+
+    res.json({ success: true, message: "WhatsApp messages sent successfully!" });
   } catch (error) {
     console.error("Error sending WhatsApp messages:", error);
     res.status(500).json({ error: "Internal server error" });
   }
 });
 
-// Bulk email sending route
+/**
+ * Bulk email sending route
+ */
 app.post(
   "/api/send-bulk-mail",
-  upload.fields([
-    { name: "recipientsFile" },
-    { name: "htmlTemplate" }
-  ]),
+  upload.fields([{ name: "recipientsFile" }, { name: "htmlTemplate" }]),
   async (req, res) => {
     try {
       const {
@@ -120,7 +141,7 @@ app.post(
         smtpUsername,
         smtpPassword,
         fromEmail,
-        emailSubject
+        emailSubject,
       } = req.body;
 
       if (!smtpHost || !smtpPort || !smtpUsername || !smtpPassword || !fromEmail || !emailSubject) {
@@ -159,6 +180,7 @@ app.post(
           console.log(`Email sent to ${recipient}`);
         } catch (err) {
           console.error(`Failed to send email to ${recipient}:`, err);
+          return res.status(500).send(`Failed to send email to ${recipient}: ${err.message}`);
         }
       }
 
@@ -172,40 +194,6 @@ app.post(
     }
   }
 );
-
-// Route to handle search and return results as JSON
-app.get("/api/search", async (req, res) => {
-  const query = req.query.query;
-  let businesses = [];
-
-  if (!query) {
-    return res.status(400).send({ message: "Query is required" });
-  }
-
-  try {
-    businesses = await scraper.searchGoogleMaps(query);
-    console.log(businesses);
-    await writeCsv(businesses);
-    res.json(businesses);
-  } catch (error) {
-    console.error("Error while scraping data:", error);
-    res.status(500).send({ message: "Error while scraping data" });
-  }
-});
-
-// Route to download the CSV file
-app.get("/api/download", (req, res) => {
-  const filePath = path.join(__dirname, "businesses.csv");
-  res.download(filePath, "business.csv", (err) => {
-    if (err) {
-      console.error("Error downloading file:", err);
-      res.status(500).send("Error downloading file");
-    }
-  });
-});
-
-// Email scraper route
-app.use("/api/email-scraper", emailScraper);
 
 // Global error handler
 app.use((err, req, res, next) => {
