@@ -17,6 +17,8 @@ const gmailSender = require("./routes/gmailSender");
 const app = express();
 const PORT = process.env.PORT || 3001;
 const server = require("http").createServer(app);
+
+// WebSocket server should be initialized here without explicitly defining 'upgrade' event
 const wss = new WebSocket.Server({ server });
 
 app.use(cors());
@@ -165,13 +167,6 @@ app.get("/api/download", (req, res) => {
 
 // Email scraper route
 app.use("/api/email-scraper", emailScraper);
-
-// Handle WebSocket upgrades (This should be done only once)
-server.on("upgrade", (req, socket, head) => {
-  wss.handleUpgrade(req, socket, head, (ws) => {
-    wss.emit("connection", ws, req);
-  });
-});
 
 // Global error handler
 app.use((err, req, res, next) => {
