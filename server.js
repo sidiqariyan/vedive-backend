@@ -166,7 +166,7 @@ app.get("/api/download", (req, res) => {
 // Email scraper route
 app.use("/api/email-scraper", emailScraper);
 
-// Handle WebSocket upgrades (This is done only once)
+// Handle WebSocket upgrades (This should be done only once)
 server.on("upgrade", (req, socket, head) => {
   wss.handleUpgrade(req, socket, head, (ws) => {
     wss.emit("connection", ws, req);
