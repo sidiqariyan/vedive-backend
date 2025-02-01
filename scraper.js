@@ -1,4 +1,3 @@
-// scraper.js
 const puppeteer = require('puppeteer-extra');
 const cheerio = require('cheerio');
 const stealthPlugin = require('puppeteer-extra-plugin-stealth');
@@ -56,7 +55,10 @@ async function navigateWithRetries(page, url, retries = 3) {
 
 async function searchGoogleMaps(query) {
   try {
-    const browser = await puppeteer.launch({ headless: true });
+    const browser = await puppeteer.launch({
+      headless: true,
+      args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-gpu"],
+    });
     const page = await browser.newPage();
     await navigateWithRetries(page, `https://www.google.com/maps/search/${query.split(" ").join("+")}`);
 
