@@ -66,15 +66,26 @@ app.post("/api/send-whatsapp", (req, res) => {
     console.log("Body:", req.body);
     console.log("Files:", req.files);
 
-    if (!req.body.message) {
-      return res.status(400).json({ error: "Message content is required" });
-    }
-
     const contactsFile = req.files?.contactsFile?.[0];
+    const messageFile = req.files?.messageFile?.[0];
+    
     if (!contactsFile) {
       return res.status(400).json({ error: "Contacts file is required" });
     }
-
+    
+    let messageContent = req.body.message || "";
+    if (messageFile) {
+      try {
+        messageContent = fs.readFileSync(messageFile.path, "utf8");
+      } catch (error) {
+        return res.status(500).json({ error: "Failed to read message file", details: error.message });
+      }
+    }
+    
+    if (!messageContent.trim()) {
+      return res.status(400).json({ error: "Message content is required" });
+    }
+    
     try {
       const workbook = xlsx.readFile(contactsFile.path);
       const phoneNumbers = xlsx.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]])
@@ -89,7 +100,7 @@ app.post("/api/send-whatsapp", (req, res) => {
       const results = { success: [], failures: [] };
       for (const [index, number] of phoneNumbers.entries()) {
         try {
-          await client.sendMessage(number, req.body.message);
+          await client.sendMessage(number, messageContent);
           results.success.push(number);
           console.log(`Sent to ${number} (${index + 1}/${phoneNumbers.length})`);
           if (index < phoneNumbers.length - 1) {
