@@ -5,7 +5,6 @@ const fs = require("fs");
 const path = require("path");
 const xlsx = require("xlsx");
 const WebSocket = require("ws");
-const nodemailer = require("nodemailer");
 const { Client, LocalAuth } = require("whatsapp-web.js");
 const qrcode = require("qrcode");
 const http = require("http");
@@ -13,8 +12,6 @@ const http = require("http");
 const app = express();
 const PORT = process.env.PORT || 3001;
 const server = http.createServer(app);
-
-// Upgrade WebSocket connection to use "wss://"
 const wss = new WebSocket.Server({ server });
 
 app.use(cors());
@@ -22,29 +19,40 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, "public")));
 
-const client = new Client({
-  authStrategy: new LocalAuth(),
-  puppeteer: { 
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
-    headless: true
-  }
-});
+const userSessions = {}; // Store WhatsApp client instances per user
 
-client.on("qr", (qr) => {
-  qrcode.toDataURL(qr, (err, url) => {
-    wss.clients.forEach(ws => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: "whatsapp_qr", data: url }));
-      }
+// Function to create a new WhatsApp client for a user
+const createWhatsAppClient = (userId) => {
+  if (userSessions[userId]) return userSessions[userId];
+
+  const client = new Client({
+    authStrategy: new LocalAuth({ clientId: userId }),
+    puppeteer: { args: ["--no-sandbox", "--disable-setuid-sandbox"], headless: true }
+  });
+
+  client.on("qr", (qr) => {
+    qrcode.toDataURL(qr, (err, url) => {
+      wss.clients.forEach(ws => {
+        if (ws.readyState === WebSocket.OPEN && ws.userId === userId) {
+          ws.send(JSON.stringify({ type: "whatsapp_qr", data: url }));
+        }
+      });
     });
   });
-});
 
-client.on("ready", () => {
-  console.log("WhatsApp Client ready");
-});
+  client.on("ready", () => {
+    console.log(`WhatsApp Client ready for user ${userId}`);
+  });
 
-client.initialize();
+  client.on("disconnected", () => {
+    console.log(`WhatsApp Client disconnected for user ${userId}`);
+    delete userSessions[userId];
+  });
+
+  client.initialize();
+  userSessions[userId] = client;
+  return client;
+};
 
 const storage = multer.diskStorage({
   destination: "./uploads/",
@@ -60,21 +68,16 @@ const upload = multer({
 
 app.post("/api/send-whatsapp", (req, res) => {
   upload(req, res, async (err) => {
-    if (err) {
-      console.error("Multer error:", err);
-      return res.status(500).json({ error: "File upload error", details: err.message });
-    }
-    
-    console.log("Received request:", req.method, req.url);
-    console.log("Body:", req.body);
-    console.log("Files:", req.files);
+    if (err) return res.status(500).json({ error: "File upload error", details: err.message });
 
+    const userId = req.body.userId;
+    if (!userId) return res.status(400).json({ error: "User ID is required" });
+    
+    const client = createWhatsAppClient(userId);
     const contactsFile = req.files?.contactsFile?.[0];
     const messageFile = req.files?.messageFile?.[0];
-    
-    if (!contactsFile) {
-      return res.status(400).json({ error: "Contacts file is required" });
-    }
+
+    if (!contactsFile) return res.status(400).json({ error: "Contacts file is required" });
     
     let messageContent = req.body.message || "";
     if (messageFile) {
@@ -84,10 +87,7 @@ app.post("/api/send-whatsapp", (req, res) => {
         return res.status(500).json({ error: "Failed to read message file", details: error.message });
       }
     }
-    
-    if (!messageContent.trim()) {
-      return res.status(400).json({ error: "Message content is required" });
-    }
+    if (!messageContent.trim()) return res.status(400).json({ error: "Message content is required" });
     
     try {
       const workbook = xlsx.readFile(contactsFile.path);
@@ -95,10 +95,8 @@ app.post("/api/send-whatsapp", (req, res) => {
         .map(row => `${row.Phone}`.replace(/\D/g, ""))
         .filter(Boolean)
         .map(num => `${num}@c.us`);
-      
-      if (phoneNumbers.length === 0) {
-        return res.status(400).json({ error: "No valid phone numbers found" });
-      }
+
+      if (phoneNumbers.length === 0) return res.status(400).json({ error: "No valid phone numbers found" });
 
       const results = { success: [], failures: [] };
       for (const [index, number] of phoneNumbers.entries()) {
@@ -106,33 +104,25 @@ app.post("/api/send-whatsapp", (req, res) => {
           await client.sendMessage(number, messageContent);
           results.success.push(number);
           console.log(`Sent to ${number} (${index + 1}/${phoneNumbers.length})`);
-          if (index < phoneNumbers.length - 1) {
-            await new Promise(resolve => setTimeout(resolve, 2000));
-          }
+          if (index < phoneNumbers.length - 1) await new Promise(resolve => setTimeout(resolve, 2000));
         } catch (error) {
           results.failures.push({ number, error: error.message });
         }
       }
       res.json({ success: results.failures.length === 0, sent: results.success.length, failed: results.failures });
     } catch (error) {
-      console.error("WhatsApp send error:", error);
       res.status(500).json({ error: "Internal server error", details: error.message });
     }
   });
 });
 
-server.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
-});
-
 wss.on("connection", (ws, req) => {
-  console.log("WebSocket client connected");
+  const userId = new URL(req.url, `http://localhost:${PORT}`).searchParams.get("userId");
+  if (userId) ws.userId = userId;
+  console.log(`WebSocket client connected for user ${userId}`);
 
-  ws.on("close", () => {
-    console.log("WebSocket client disconnected");
-  });
-
-  ws.on("error", (err) => {
-    console.error("WebSocket error:", err);
-  });
+  ws.on("close", () => console.log(`WebSocket client disconnected for user ${userId}`));
+  ws.on("error", (err) => console.error("WebSocket error:", err));
 });
+
+server.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
