@@ -10,8 +10,8 @@ const { Client, LocalAuth } = require("whatsapp-web.js");
 const qrcode = require("qrcode");
 
 // Load SSL certificates
-const privateKey = fs.readFileSync("/etc/letsencrypt/live/YOUR_DOMAIN/privkey.pem", "utf8");
-const certificate = fs.readFileSync("/etc/letsencrypt/live/YOUR_DOMAIN/fullchain.pem", "utf8");
+const privateKey = fs.readFileSync("/etc/letsencrypt/live/http://ec2-3-111-32-68.ap-south-1.compute.amazonaws.com/privkey.pem", "utf8");
+const certificate = fs.readFileSync("/etc/letsencrypt/live/http://ec2-3-111-32-68.ap-south-1.compute.amazonaws.com/fullchain.pem", "utf8");
 const credentials = { key: privateKey, cert: certificate };
 
 const app = express();
