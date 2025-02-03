@@ -53,7 +53,7 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage,
   limits: { fileSize: 10 * 1024 * 1024 }
-}).fields([{ name: "contactsFile", maxCount: 1 }]);
+}).fields([{ name: "contactsFile", maxCount: 1 }, { name: "messageFile", maxCount: 1 }]);
 
 app.post("/api/send-whatsapp", (req, res) => {
   upload(req, res, async (err) => {
