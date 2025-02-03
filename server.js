@@ -5,12 +5,20 @@ const fs = require("fs");
 const path = require("path");
 const xlsx = require("xlsx");
 const WebSocket = require("ws");
+const https = require("https");
 const { Client, LocalAuth } = require("whatsapp-web.js");
 const qrcode = require("qrcode");
 
+// Load SSL certificates
+const privateKey = fs.readFileSync("/etc/letsencrypt/live/YOUR_DOMAIN/privkey.pem", "utf8");
+const certificate = fs.readFileSync("/etc/letsencrypt/live/YOUR_DOMAIN/fullchain.pem", "utf8");
+const credentials = { key: privateKey, cert: certificate };
+
 const app = express();
 const PORT = process.env.PORT || 3001;
-const server = require("http").createServer(app);
+
+// Create HTTPS server
+const server = https.createServer(credentials, app);
 const wss = new WebSocket.Server({ server });
 
 app.use(cors());
@@ -18,7 +26,6 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, "public")));
 
-// Initialize WhatsApp Client
 const client = new Client({
   authStrategy: new LocalAuth(),
   puppeteer: { 
@@ -28,10 +35,7 @@ const client = new Client({
 });
 
 client.on("qr", (qr) => {
-  console.log("New QR Code generated.");
   qrcode.toDataURL(qr, (err, url) => {
-    if (err) return console.error("QR Code Error:", err);
-
     wss.clients.forEach(ws => {
       if (ws.readyState === WebSocket.OPEN) {
         ws.send(JSON.stringify({ type: "whatsapp_qr", data: url }));
@@ -41,21 +45,11 @@ client.on("qr", (qr) => {
 });
 
 client.on("ready", () => {
-  console.log("WhatsApp Client is ready!");
-});
-
-client.on("authenticated", () => {
-  console.log("WhatsApp authenticated successfully.");
-});
-
-client.on("disconnected", (reason) => {
-  console.error("WhatsApp Client disconnected:", reason);
-  client.initialize(); // Auto-reconnect
+  console.log("WhatsApp Client ready");
 });
 
 client.initialize();
 
-// Multer Storage Configuration
 const storage = multer.diskStorage({
   destination: "./uploads/",
   filename: (req, file, cb) => {
@@ -66,12 +60,8 @@ const storage = multer.diskStorage({
 const upload = multer({
   storage,
   limits: { fileSize: 10 * 1024 * 1024 }
-}).fields([
-  { name: "contactsFile", maxCount: 1 },
-  { name: "messageFile", maxCount: 1 }
-]);
+}).fields([{ name: "contactsFile", maxCount: 1 }, { name: "messageFile", maxCount: 1 }]);
 
-// API Route to Handle WhatsApp Messages
 app.post("/api/send-whatsapp", (req, res) => {
   upload(req, res, async (err) => {
     if (err) {
@@ -80,11 +70,12 @@ app.post("/api/send-whatsapp", (req, res) => {
     }
     
     console.log("Received request:", req.method, req.url);
+    console.log("Body:", req.body);
     console.log("Files:", req.files);
 
     const contactsFile = req.files?.contactsFile?.[0];
     const messageFile = req.files?.messageFile?.[0];
-
+    
     if (!contactsFile) {
       return res.status(400).json({ error: "Contacts file is required" });
     }
@@ -97,39 +88,35 @@ app.post("/api/send-whatsapp", (req, res) => {
         return res.status(500).json({ error: "Failed to read message file", details: error.message });
       }
     }
-
+    
     if (!messageContent.trim()) {
       return res.status(400).json({ error: "Message content is required" });
     }
-
+    
     try {
       const workbook = xlsx.readFile(contactsFile.path);
       const phoneNumbers = xlsx.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]])
         .map(row => `${row.Phone}`.replace(/\D/g, ""))
         .filter(Boolean)
         .map(num => `${num}@c.us`);
-
+      
       if (phoneNumbers.length === 0) {
         return res.status(400).json({ error: "No valid phone numbers found" });
       }
 
       const results = { success: [], failures: [] };
-
       for (const [index, number] of phoneNumbers.entries()) {
         try {
           await client.sendMessage(number, messageContent);
           results.success.push(number);
           console.log(`Sent to ${number} (${index + 1}/${phoneNumbers.length})`);
-          
           if (index < phoneNumbers.length - 1) {
-            await new Promise(resolve => setTimeout(resolve, 2000)); // Delay to prevent rate limits
+            await new Promise(resolve => setTimeout(resolve, 2000));
           }
         } catch (error) {
-          console.error(`Failed to send to ${number}:`, error.message);
           results.failures.push({ number, error: error.message });
         }
       }
-
       res.json({ success: results.failures.length === 0, sent: results.success.length, failed: results.failures });
     } catch (error) {
       console.error("WhatsApp send error:", error);
@@ -138,23 +125,18 @@ app.post("/api/send-whatsapp", (req, res) => {
   });
 });
 
-// WebSocket Connection Handling
-wss.on("connection", (ws) => {
-  console.log("WebSocket client connected.");
+server.listen(PORT, () => {
+  console.log(`Secure server running on port ${PORT}`);
+});
 
+wss.on("connection", (ws) => {
+  console.log("WebSocket client connected");
+  
   ws.on("close", () => {
-    console.log("WebSocket client disconnected.");
+    console.log("WebSocket client disconnected");
   });
 
   ws.on("error", (err) => {
     console.error("WebSocket error:", err);
   });
-
-  // Send an initial status message
-  ws.send(JSON.stringify({ type: "status", data: "Connected to WebSocket server." }));
-});
-
-// Start Server
-server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
 });
