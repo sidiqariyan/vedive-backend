@@ -5,20 +5,16 @@ const fs = require("fs");
 const path = require("path");
 const xlsx = require("xlsx");
 const WebSocket = require("ws");
-const https = require("https");
+const nodemailer = require("nodemailer");
 const { Client, LocalAuth } = require("whatsapp-web.js");
 const qrcode = require("qrcode");
-
-// Load SSL certificates
-const privateKey = fs.readFileSync("/etc/letsencrypt/live/http://ec2-3-111-32-68.ap-south-1.compute.amazonaws.com/privkey.pem", "utf8");
-const certificate = fs.readFileSync("/etc/letsencrypt/live/http://ec2-3-111-32-68.ap-south-1.compute.amazonaws.com/fullchain.pem", "utf8");
-const credentials = { key: privateKey, cert: certificate };
+const http = require("http");
 
 const app = express();
 const PORT = process.env.PORT || 3001;
+const server = http.createServer(app);
 
-// Create HTTPS server
-const server = https.createServer(credentials, app);
+// Upgrade WebSocket connection to use "wss://"
 const wss = new WebSocket.Server({ server });
 
 app.use(cors());
@@ -126,12 +122,12 @@ app.post("/api/send-whatsapp", (req, res) => {
 });
 
 server.listen(PORT, () => {
-  console.log(`Secure server running on port ${PORT}`);
+  console.log(`Server running on http://localhost:${PORT}`);
 });
 
-wss.on("connection", (ws) => {
+wss.on("connection", (ws, req) => {
   console.log("WebSocket client connected");
-  
+
   ws.on("close", () => {
     console.log("WebSocket client disconnected");
   });
