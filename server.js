@@ -21,19 +21,17 @@ app.use(express.static(path.join(__dirname, "public")));
 
 const client = new Client({
   authStrategy: new LocalAuth(),
-  puppeteer: {
+  puppeteer: { 
     args: ["--no-sandbox", "--disable-setuid-sandbox"],
-    headless: true,
-  },
+    headless: true
+  }
 });
 
 client.on("qr", (qr) => {
   qrcode.toDataURL(qr, (err, url) => {
-    wss.clients.forEach((ws) => {
+    wss.clients.forEach(ws => {
       if (ws.readyState === WebSocket.OPEN) {
-        ws.send(
-          JSON.stringify({ type: "whatsapp_qr", data: url })
-        );
+        ws.send(JSON.stringify({ type: "whatsapp_qr", data: url }));
       }
     });
   });
@@ -49,64 +47,54 @@ const storage = multer.diskStorage({
   destination: "./uploads/",
   filename: (req, file, cb) => {
     cb(null, `${Date.now()}-${file.originalname}`);
-  },
+  }
 });
 
 const upload = multer({
   storage,
-  limits: { fileSize: 10 * 1024 * 1024 },
-}).fields([
-  { name: "contactsFile", maxCount: 1 },
-  { name: "messageFile", maxCount: 1 },
-]);
+  limits: { fileSize: 10 * 1024 * 1024 }
+}).fields([{ name: "contactsFile", maxCount: 1 }, { name: "messageFile", maxCount: 1 }]);
 
 app.post("/api/send-whatsapp", (req, res) => {
   upload(req, res, async (err) => {
     if (err) {
       console.error("Multer error:", err);
-      return res
-        .status(500)
-        .json({ error: "File upload error", details: err.message });
+      return res.status(500).json({ error: "File upload error", details: err.message });
     }
-
+    
     console.log("Received request:", req.method, req.url);
     console.log("Body:", req.body);
     console.log("Files:", req.files);
 
     const contactsFile = req.files?.contactsFile?.[0];
     const messageFile = req.files?.messageFile?.[0];
-
+    
     if (!contactsFile) {
       return res.status(400).json({ error: "Contacts file is required" });
     }
-
+    
     let messageContent = req.body.message || "";
     if (messageFile) {
       try {
         messageContent = fs.readFileSync(messageFile.path, "utf8");
       } catch (error) {
-        return res
-          .status(500)
-          .json({ error: "Failed to read message file", details: error.message });
+        return res.status(500).json({ error: "Failed to read message file", details: error.message });
       }
     }
-
+    
     if (!messageContent.trim()) {
       return res.status(400).json({ error: "Message content is required" });
     }
-
+    
     try {
       const workbook = xlsx.readFile(contactsFile.path);
-      const phoneNumbers = xlsx.utils
-        .sheet_to_json(workbook.Sheets[workbook.SheetNames[0]])
-        .map((row) => `${row.Phone}`.replace(/\D/g, ""))
+      const phoneNumbers = xlsx.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]])
+        .map(row => `${row.Phone}`.replace(/\D/g, ""))
         .filter(Boolean)
-        .map((num) => `${num}@c.us`);
-
+        .map(num => `${num}@c.us`);
+      
       if (phoneNumbers.length === 0) {
-        return res
-          .status(400)
-          .json({ error: "No valid phone numbers found" });
+        return res.status(400).json({ error: "No valid phone numbers found" });
       }
 
       const results = { success: [], failures: [] };
@@ -116,28 +104,32 @@ app.post("/api/send-whatsapp", (req, res) => {
           results.success.push(number);
           console.log(`Sent to ${number} (${index + 1}/${phoneNumbers.length})`);
           if (index < phoneNumbers.length - 1) {
-            await new Promise((resolve) => setTimeout(resolve, 2000));
+            await new Promise(resolve => setTimeout(resolve, 2000));
           }
         } catch (error) {
           results.failures.push({ number, error: error.message });
         }
       }
-
-      res.json({
-        success: results.failures.length === 0,
-        sent: results.success.length,
-        failed: results.failures,
-      });
+      res.json({ success: results.failures.length === 0, sent: results.success.length, failed: results.failures });
     } catch (error) {
       console.error("WhatsApp send error:", error);
-      res.status(500).json({
-        error: "Internal server error",
-        details: error.message,
-      });
+      res.status(500).json({ error: "Internal server error", details: error.message });
     }
   });
 });
 
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+});
+
+wss.on('connection', (ws) => {
+  console.log("WebSocket client connected");
+  
+  ws.on('close', () => {
+    console.log("WebSocket client disconnected");
+  });
+
+  ws.on('error', (err) => {
+    console.error("WebSocket error:", err);
+  });
 });
