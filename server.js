@@ -271,7 +271,7 @@ app.post("/api/send-bulk-mail",
     }
   }
 );
-app.use("api/email-scraper", mailScraper);
+app.use("/api/email-scraper", mailScraper);
 // Server Start
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
