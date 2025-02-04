@@ -5,6 +5,7 @@ const fs = require("fs");
 const path = require("path");
 const xlsx = require("xlsx");
 const WebSocket = require("ws");
+const nodemailer = require("nodemailer");
 const { Client, LocalAuth } = require("whatsapp-web.js");
 const qrcode = require("qrcode");
 const http = require("http");
@@ -14,11 +15,16 @@ const PORT = process.env.PORT || 3001;
 const server = http.createServer(app);
 const wss = new WebSocket.Server({ server });
 
+// Configuration
+const MAX_MESSAGE_DELAY_MS = 2000; // 2 seconds between WhatsApp messages
+const ALLOWED_MIME_TYPES = ["text/html", "application/html"];
+
 app.use(cors());
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, "public")));
 
+// Initialize WhatsApp Client (Shared for both programs)
 const clients = new Map();
 
 const createClient = (userId) => {
@@ -40,6 +46,10 @@ const createClient = (userId) => {
   });
 
   client.on("ready", () => console.log(`WhatsApp Client Ready for ${userId}`));
+  client.on("disconnected", (reason) => {
+    console.log(`WhatsApp Client disconnected for ${userId}:`, reason);
+    client.initialize();
+  });
 
   client.initialize();
   clients.set(userId, client);
@@ -54,13 +64,15 @@ app.post("/api/connect", (req, res) => {
   res.json({ message: `WhatsApp connection initialized for ${userId}` });
 });
 
+// File Upload Setup
 const storage = multer.diskStorage({
   destination: "./uploads/",
   filename: (req, file, cb) => cb(null, `${Date.now()}-${file.originalname}`)
 });
 
-const upload = multer({ storage }).single("contactsFile");
+const upload = multer({ storage, limits: { fileSize: 10 * 1024 * 1024 } }).single("contactsFile");
 
+// WhatsApp Send Message Endpoint
 app.post("/api/send-whatsapp", (req, res) => {
   upload(req, res, async (err) => {
     if (err) return res.status(500).json({ error: "File upload error", details: err.message });
@@ -102,9 +114,83 @@ app.post("/api/send-whatsapp", (req, res) => {
   });
 });
 
-server.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
+// Email Send Endpoint
+app.post("/api/send-bulk-mail", upload.fields([{ name: "recipientsFile", maxCount: 1 }, { name: "htmlTemplate", maxCount: 1 }]), async (req, res) => {
+  const results = { success: [], failures: [] };
+  let transporter;
 
+  try {
+    // Validate inputs
+    const requiredFields = ["smtpHost", "smtpPort", "smtpUsername", "smtpPassword", "fromEmail", "emailSubject"];
+    const missing = requiredFields.filter(field => !req.body[field]);
+    if (missing.length > 0) {
+      return res.status(400).json({ error: "Missing required fields", missing });
+    }
+
+    // Process files
+    const recipientsFile = req.files?.recipientsFile?.[0];
+    const htmlTemplateFile = req.files?.htmlTemplate?.[0];
+    if (!recipientsFile || !htmlTemplateFile) {
+      return res.status(400).json({ error: "Both recipients file and HTML template are required" });
+    }
+
+    const recipients = fs.readFileSync(recipientsFile.path, "utf-8")
+      .split(/\r?\n/)
+      .map(email => email.trim())
+      .filter(email => email.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/));
+
+    if (recipients.length === 0) {
+      return res.status(400).json({ error: "No valid email addresses found" });
+    }
+
+    transporter = nodemailer.createTransport({
+      host: req.body.smtpHost,
+      port: parseInt(req.body.smtpPort),
+      secure: req.body.smtpPort === "465",
+      auth: { user: req.body.smtpUsername, pass: req.body.smtpPassword }
+    });
+
+    await transporter.verify();
+    const htmlContent = fs.readFileSync(htmlTemplateFile.path, "utf-8");
+
+    for (const recipient of recipients) {
+      try {
+        await transporter.sendMail({
+          from: `"${req.body.fromEmail}" <${req.body.smtpUsername}>`,
+          to: recipient,
+          subject: req.body.emailSubject,
+          html: htmlContent
+        });
+        results.success.push(recipient);
+      } catch (error) {
+        results.failures.push({ recipient, error: error.message });
+      }
+    }
+
+    res.json({ success: results.failures.length === 0, sent: results.success.length, failed: results.failures });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to send emails", details: error.message });
+  } finally {
+    [recipientsFile, htmlTemplateFile].forEach(file => { if (file?.path) fs.unlinkSync(file.path); });
+    if (transporter) transporter.close();
+  }
+});
+
+// WebSocket Status Update
 wss.on("connection", (ws) => {
   console.log("WebSocket client connected");
   ws.on("close", () => console.log("WebSocket client disconnected"));
+});
+
+server.listen(PORT, () => {
+  console.log(`Server running on http://localhost:${PORT}`);
+});
+
+process.on("unhandledRejection", (reason, promise) => {
+  console.error("Unhandled Rejection at:", promise, "reason:", reason);
+});
+
+process.on("uncaughtException", (error) => {
+  console.error("Uncaught Exception:", error);
+  process.exit(1);
 });
