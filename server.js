@@ -19,6 +19,11 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, "public")));
 
+// Ensure the uploads folder exists
+if (!fs.existsSync("./uploads")) {
+  fs.mkdirSync("./uploads");
+}
+
 const userSessions = {}; // Store WhatsApp client instances per user
 
 // Function to create a new WhatsApp client for a user
@@ -44,9 +49,10 @@ const createWhatsAppClient = (userId) => {
     console.log(`WhatsApp Client ready for user ${userId}`);
   });
 
-  client.on("disconnected", () => {
-    console.log(`WhatsApp Client disconnected for user ${userId}`);
-    delete userSessions[userId];
+  client.on("disconnected", (reason) => {
+    console.log(`WhatsApp Client disconnected for user ${userId}. Reason: ${reason}`);
+    delete userSessions[userId]; // Clean up the session
+    createWhatsAppClient(userId); // Re-initialize the client
   });
 
   client.initialize();
@@ -118,7 +124,11 @@ app.post("/api/send-whatsapp", (req, res) => {
 
 wss.on("connection", (ws, req) => {
   const userId = new URL(req.url, `http://localhost:${PORT}`).searchParams.get("userId");
-  if (userId) ws.userId = userId;
+  if (!userId) {
+    ws.close(1000, "User ID is required");
+    return;
+  }
+  ws.userId = userId;
   console.log(`WebSocket client connected for user ${userId}`);
 
   ws.on("close", () => console.log(`WebSocket client disconnected for user ${userId}`));
