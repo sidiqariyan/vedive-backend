@@ -19,76 +19,29 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(express.static(path.join(__dirname, "public")));
 
-// Ensure the uploads folder exists
-if (!fs.existsSync("./uploads")) {
-  fs.mkdirSync("./uploads");
-}
+const clients = new Map(); // Store multiple user sessions
 
-const userSessions = {}; // Store WhatsApp client instances and statuses
-
-// Client status tracking
-const clientStatus = {};
-
-const createWhatsAppClient = (userId) => {
-  if (userSessions[userId]) return userSessions[userId];
+const createClient = (userId) => {
+  if (clients.has(userId)) return clients.get(userId);
 
   const client = new Client({
     authStrategy: new LocalAuth({ clientId: userId }),
-    puppeteer: { 
-      args: ["--no-sandbox", "--disable-setuid-sandbox"], 
-      headless: true 
-    }
+    puppeteer: { args: ["--no-sandbox", "--disable-setuid-sandbox"], headless: true },
   });
 
-  clientStatus[userId] = {
-    ready: false,
-    authenticated: false
-  };
-
   client.on("qr", (qr) => {
-    if (clientStatus[userId].authenticated) return;
-    
     qrcode.toDataURL(qr, (err, url) => {
       wss.clients.forEach(ws => {
-        if (ws.readyState === WebSocket.OPEN && ws.userId === userId) {
-          ws.send(JSON.stringify({ 
-            type: "whatsapp_qr", 
-            data: url 
-          }));
+        if (ws.readyState === WebSocket.OPEN) {
+          ws.send(JSON.stringify({ type: "whatsapp_qr", userId, data: url }));
         }
       });
     });
   });
 
-  client.on("ready", () => {
-    console.log(`Client ready for ${userId}`);
-    clientStatus[userId] = {
-      ready: true,
-      authenticated: true
-    };
-    
-    wss.clients.forEach(ws => {
-      if (ws.readyState === WebSocket.OPEN && ws.userId === userId) {
-        ws.send(JSON.stringify({ 
-          type: "whatsapp_ready" 
-        }));
-      }
-    });
-  });
-
-  client.on("auth_failure", () => {
-    clientStatus[userId].authenticated = false;
-  });
-
-  client.on("disconnected", (reason) => {
-    console.log(`Client disconnected (${userId}): ${reason}`);
-    clientStatus[userId].ready = false;
-    delete userSessions[userId];
-    createWhatsAppClient(userId);
-  });
-
+  client.on("ready", () => console.log(`WhatsApp Client ready for user ${userId}`));
   client.initialize();
-  userSessions[userId] = client;
+  clients.set(userId, client);
   return client;
 };
 
@@ -99,156 +52,55 @@ const storage = multer.diskStorage({
   }
 });
 
-const upload = multer({
-  storage,
-  limits: { fileSize: 10 * 1024 * 1024 }
-}).fields([{ name: "contactsFile", maxCount: 1 }, { name: "messageFile", maxCount: 1 }]);
+const upload = multer({ storage }).fields([{ name: "contactsFile", maxCount: 1 }]);
 
-// Middleware to wait for client readiness
-const waitForClientReady = (userId) => {
-  return new Promise((resolve, reject) => {
-    const checkReady = () => {
-      if (clientStatus[userId]?.ready) {
-        resolve(true);
-      } else {
-        setTimeout(checkReady, 1000);
-      }
-    };
-    checkReady();
-  });
-};
+app.post("/api/connect", (req, res) => {
+  const { userId } = req.body;
+  if (!userId) return res.status(400).json({ error: "User ID is required" });
+  createClient(userId);
+  res.json({ success: true, message: "Client initialized, scan the QR code." });
+});
 
-app.post("/api/send-whatsapp", async (req, res) => {
+app.post("/api/send-whatsapp", (req, res) => {
   upload(req, res, async (err) => {
+    if (err) return res.status(500).json({ error: "File upload error", details: err.message });
+    
+    const { userId, message } = req.body;
+    const contactsFile = req.files?.contactsFile?.[0];
+    if (!userId || !contactsFile || !message) return res.status(400).json({ error: "Missing required fields" });
+    
+    const client = clients.get(userId);
+    if (!client) return res.status(400).json({ error: "Client not connected" });
+    
     try {
-      if (err) {
-        if (err instanceof multer.MulterError) {
-          return res.status(400).json({ 
-            error: "File upload error", 
-            details: err.message 
-          });
-        }
-        return res.status(500).json({ 
-          error: "Server error", 
-          details: err.message 
-        });
-      }
-
-      const userId = req.body.userId;
-      if (!userId) {
-        return res.status(400).json({ error: "User ID is required" });
-      }
-
-      const client = createWhatsAppClient(userId);
-      await waitForClientReady(userId);
-
-      const contactsFile = req.files?.contactsFile?.[0];
-      const messageFile = req.files?.messageFile?.[0];
-
-      if (!contactsFile) {
-        return res.status(400).json({ error: "Contacts file is required" });
-      }
-
-      let messageContent = req.body.message || "";
-      if (messageFile) {
-        try {
-          messageContent = fs.readFileSync(messageFile.path, "utf8");
-        } catch (error) {
-          return res.status(500).json({ 
-            error: "Failed to read message file", 
-            details: error.message 
-          });
-        }
-      }
-
-      if (!messageContent.trim()) {
-        return res.status(400).json({ error: "Message content is required" });
-      }
-
       const workbook = xlsx.readFile(contactsFile.path);
-      const phoneNumbers = xlsx.utils
-        .sheet_to_json(workbook.Sheets[workbook.SheetNames[0]])
-        .map(row => `${row.Phone}`.replace(/[^+\d]/g, "")) // Keep + and digits
-        .filter(num => num.length >= 8 && num.length <= 15)
+      const phoneNumbers = xlsx.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]])
+        .map(row => `${row.Phone}`.replace(/\D/g, ""))
+        .filter(Boolean)
         .map(num => `${num}@c.us`);
-
-      if (phoneNumbers.length === 0) {
-        return res.status(400).json({ error: "No valid phone numbers found" });
-      }
-
+      
       const results = { success: [], failures: [] };
       for (const [index, number] of phoneNumbers.entries()) {
         try {
-          if (!clientStatus[userId].ready) {
-            throw new Error("WhatsApp client disconnected");
-          }
-
-          await client.sendMessage(number, messageContent);
+          await client.sendMessage(number, message);
           results.success.push(number);
-          
-          // Randomized delay between 5-10 seconds
-          const delay = 5000 + Math.random() * 5000;
-          if (index < phoneNumbers.length - 1) {
-            await new Promise(resolve => setTimeout(resolve, delay));
-          }
+          console.log(`Sent to ${number} (${index + 1}/${phoneNumbers.length})`);
+          if (index < phoneNumbers.length - 1) await new Promise(resolve => setTimeout(resolve, 2000));
         } catch (error) {
-          results.failures.push({ 
-            number, 
-            error: error.message 
-          });
+          results.failures.push({ number, error: error.message });
         }
       }
-
-      res.json({ 
-        success: results.failures.length === 0,
-        sent: results.success.length,
-        failed: results.failures 
-      });
+      res.json({ success: results.failures.length === 0, sent: results.success.length, failed: results.failures });
     } catch (error) {
-      console.error("Error in send route:", error);
-      res.status(500).json({ 
-        error: "Internal server error", 
-        details: error.message 
-      });
-    } finally {
-      // Clean up uploaded files
-      if (req.files) {
-        Object.values(req.files).forEach(files => {
-          files.forEach(file => {
-            try {
-              fs.unlinkSync(file.path);
-            } catch (err) {
-              console.error("Error deleting file:", err);
-            }
-          });
-        });
-      }
+      res.status(500).json({ error: "Error sending messages", details: error.message });
     }
   });
 });
 
-wss.on("connection", (ws, req) => {
-  const url = new URL(req.url, `http://localhost:${PORT}`);
-  const userId = url.searchParams.get("userId");
-  
-  if (!userId) {
-    ws.close(1008, "User ID required");
-    return;
-  }
-  
-  ws.userId = userId;
-  console.log(`WS connected: ${userId}`);
+server.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
 
-  // Send current status if available
-  if (clientStatus[userId]?.ready) {
-    ws.send(JSON.stringify({ type: "whatsapp_ready" }));
-  }
-
-  ws.on("close", () => {
-    console.log(`WS disconnected: ${userId}`);
-  });
-});
-
-server.listen(PORT, () => {
-  console.log(`Server running on http://localhost:${PORT}`);
+wss.on("connection", (ws) => {
+  console.log("WebSocket client connected");
+  ws.on("close", () => console.log("WebSocket client disconnected"));
+  ws.on("error", (err) => console.error("WebSocket error:", err));
 });
