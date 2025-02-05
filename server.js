@@ -8,8 +8,8 @@ const WebSocket = require("ws");
 const nodemailer = require("nodemailer");
 const { Client, LocalAuth } = require("whatsapp-web.js");
 const qrcode = require("qrcode");
-const mailScraper = require("./routes/scraper")
-
+const mailScraper = require("./routes/scraper");
+const gmailSender = require("./routes/gmailSender");
 const app = express();
 const PORT = process.env.PORT || 3001;
 const server = require("http").createServer(app);
@@ -272,6 +272,7 @@ app.post("/api/send-bulk-mail",
   }
 );
 app.use("/api/email-scraper", mailScraper);
+app.use("/", gmailSender);
 // Server Start
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
