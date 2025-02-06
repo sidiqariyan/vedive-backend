@@ -35,11 +35,11 @@ const client = new Client({
 
 client.on("qr", (qr) => {
   qrcode.toDataURL(qr, (err, url) => {
-    wss.clients.forEach((ws) => {
-      if (ws.readyState === WebSocket.OPEN) {
-        ws.send(JSON.stringify({ type: "whatsapp_qr", data: url }));
-      }
-    });
+  wss.clients.forEach((ws) => {
+  if (ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ type: "whatsapp_qr", data: url }));
+  }
+});
   });
 });
 
