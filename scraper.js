@@ -2,6 +2,7 @@
 const puppeteer = require('puppeteer-extra');
 const cheerio = require('cheerio');
 const stealthPlugin = require('puppeteer-extra-plugin-stealth');
+const createCsvWriter = require('csv-writer').createObjectCsvWriter;
 
 puppeteer.use(stealthPlugin());
 
@@ -39,6 +40,26 @@ async function navigateWithRetries(page, url, retries = 3) {
       if (i === retries - 1) throw error;
     }
   }
+}
+
+async function saveToCSV(businesses) {
+  const csvWriter = createCsvWriter({
+    path: 'businesses.csv',  // Path where CSV file will be saved
+    header: [
+      { id: 'index', title: 'Index' },
+      { id: 'storeName', title: 'Store Name' },
+      { id: 'placeId', title: 'Place ID' },
+      { id: 'address', title: 'Address' },
+      { id: 'category', title: 'Category' },
+      { id: 'phone', title: 'Phone' },
+      { id: 'googleUrl', title: 'Google URL' },
+      { id: 'bizWebsite', title: 'Business Website' },
+      { id: 'ratingText', title: 'Rating' }
+    ]
+  });
+
+  await csvWriter.writeRecords(businesses);
+  console.log('The CSV file was written successfully');
 }
 
 async function searchGoogleMaps(query) {
@@ -85,7 +106,10 @@ async function searchGoogleMaps(query) {
       });
     });
 
-    businesses.sort((a, b) => (b.stars || 0) - (a.stars || 0));
+    businesses.sort((a, b) => (b.ratingText || 0) - (a.ratingText || 0));
+
+    // Save the businesses data to CSV file
+    await saveToCSV(businesses);
 
     await browser.close();
     return businesses;
