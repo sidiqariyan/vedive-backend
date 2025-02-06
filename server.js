@@ -54,6 +54,12 @@ client.on("disconnected", (reason) => {
   client.initialize();
 });
 
+if (!client.info?.user) {
+  return res.status(425).json({
+    error: "WhatsApp client not ready. Please authenticate first."
+  });
+}
+
 client.initialize();
 
 // Helpers
