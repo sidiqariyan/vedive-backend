@@ -1,40 +1,28 @@
+// scraper.js
 const puppeteer = require('puppeteer-extra');
 const cheerio = require('cheerio');
 const stealthPlugin = require('puppeteer-extra-plugin-stealth');
 
 puppeteer.use(stealthPlugin());
 
-// Manual delay function
 function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
 async function autoScroll(page) {
   await page.evaluate(async () => {
-    const wrapper = document.querySelector('div[role="feed"]');
-
     await new Promise((resolve) => {
       let totalHeight = 0;
       const distance = 1000;
       const scrollDelay = 3000;
-
-      const timer = setInterval(async () => {
-        const scrollHeightBefore = wrapper.scrollHeight;
-        wrapper.scrollBy(0, distance);
+      
+      const timer = setInterval(() => {
+        window.scrollBy(0, distance);
         totalHeight += distance;
 
-        if (totalHeight >= scrollHeightBefore) {
-          totalHeight = 0;
-          await new Promise(resolve => setTimeout(resolve, scrollDelay));
-
-          const scrollHeightAfter = wrapper.scrollHeight;
-
-          if (scrollHeightAfter > scrollHeightBefore) {
-            return;
-          } else {
-            clearInterval(timer);
-            resolve();
-          }
+        if (totalHeight >= document.body.scrollHeight) {
+          clearInterval(timer);
+          resolve();
         }
       }, 700);
     });
@@ -56,66 +44,50 @@ async function navigateWithRetries(page, url, retries = 3) {
 async function searchGoogleMaps(query) {
   try {
     const browser = await puppeteer.launch({
-      headless: true,
+      headless: process.env.HEADLESS !== "false",
       args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-gpu"],
     });
     const page = await browser.newPage();
     await navigateWithRetries(page, `https://www.google.com/maps/search/${query.split(" ").join("+")}`);
 
-    await delay(5000); // Initial wait
-    await autoScroll(page); // Scroll and wait for all data to load
+    await delay(5000);
+    await autoScroll(page);
 
     const html = await page.content();
     const $ = cheerio.load(html);
-    const aTags = $('a');
-    const parents = [];
-
-    aTags.each((i, el) => {
-      const href = $(el).attr('href');
-      if (href && href.includes('/maps/place/')) {
-        parents.push($(el).parent());
-      }
-    });
-
     const businesses = [];
 
-    let index = 0;
-    parents.forEach((parent) => {
-      const url = parent.find('a').attr('href');
+    $('a[href*="/maps/place/"]').each((i, el) => {
+      const parent = $(el).parent();
+      const url = $(el).attr('href');
       const website = parent.find('a[data-value="Website"]').attr('href');
       const storeName = parent.find('div.fontHeadlineSmall').text();
-      const ratingText = parent.find('span.fontBodyMedium > span').attr('aria-label');
-
-      const bodyDiv = parent.find('div.fontBodyMedium').first();
-      const children = bodyDiv.children();
-      const lastChild = children.last();
-      const firstOfLast = lastChild.children().first();
-      const lastOfLast = lastChild.children().last();
+      const ratingText = parent.find('span[aria-label]').attr('aria-label') || null;
       
-      index += 1;
+      const detailsText = parent.find('div.fontBodyMedium').first().text().split('·').map(t => t.trim());
+      const category = detailsText.length > 0 ? detailsText[0] : null;
+      const address = detailsText.length > 1 ? detailsText[1] : null;
+      const phone = detailsText.length > 2 ? detailsText[2] : null;
+
+      const placeIdMatch = url?.match(/ChI[\w-]+/);
+      const placeId = placeIdMatch ? placeIdMatch[0] : null;
+
       businesses.push({
-        index,
+        index: i + 1,
         storeName,
-        placeId: `ChI${url?.split('?')[0]?.split('ChI')[1]}`,
-        address: firstOfLast?.text()?.split('·')?.[1]?.trim(),
-        category: firstOfLast?.text()?.split('·')?.[0]?.trim(),
-        phone: lastOfLast?.text()?.split('·')?.[1]?.trim(),
+        placeId,
+        address,
+        category,
+        phone,
         googleUrl: url,
         bizWebsite: website,
         ratingText,
       });
     });
 
-    businesses.sort((a, b) => {
-      if (a.stars && b.stars) {
-        return b.stars - a.stars;
-      } else {
-        return 0;
-      }
-    });
+    businesses.sort((a, b) => (b.stars || 0) - (a.stars || 0));
 
     await browser.close();
-
     return businesses;
   } catch (error) {
     console.error('Error while scraping Google Maps:', error);
