@@ -290,7 +290,7 @@ app.get('/api/numberScraper', async (req, res) => {
 });
 app.get('/api/download', (req, res) => {
   const filePath = path.join(__dirname, 'businesses.csv'); // Make sure the path is correct
-  res.download(filePath, 'businesses.csv'', (err) => {
+  res.download(filePath, 'businesses.csv', (err) => {
     if (err) {
       res.status(500).json({ error: 'Failed to download the file' });
     }
