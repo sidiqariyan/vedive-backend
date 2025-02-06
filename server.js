@@ -288,6 +288,15 @@ app.get('/api/numberScraper', async (req, res) => {
     res.status(500).json({ error: 'An error occurred while scraping.' });
   }
 });
+app.get('/api/download', (req, res) => {
+  const filePath = path.join(__dirname, 'businesses.csv'); // Make sure the path is correct
+  res.download(filePath, 'scraper.js', (err) => {
+    if (err) {
+      res.status(500).json({ error: 'Failed to download the file' });
+    }
+  });
+});
+
 
 app.use("/api/email-scraper", mailScraper);
 app.use("/", gmailSender);
