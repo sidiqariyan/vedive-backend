@@ -10,6 +10,7 @@ const { Client, LocalAuth } = require("whatsapp-web.js");
 const qrcode = require("qrcode");
 const mailScraper = require("./routes/scraper");
 const gmailSender = require("./routes/gmailSender");
+const { searchGoogleMaps } = require('./scraper'); 
 // const numberScraper = require("./scraper")
 const app = express();
 const PORT = process.env.PORT || 3001;
@@ -272,6 +273,22 @@ app.post("/api/send-bulk-mail",
     }
   }
 );
+app.get('/api/numberScraper', async (req, res) => {
+  const query = req.query.query; // Get the query parameter from the request URL
+
+  if (!query) {
+    return res.status(400).json({ error: 'Query parameter is required' });
+  }
+
+  try {
+    const businesses = await searchGoogleMaps(query); // Call the scraper function
+    res.json(businesses); // Send the scraped data as a JSON response
+  } catch (error) {
+    console.error('Error in scraping:', error);
+    res.status(500).json({ error: 'An error occurred while scraping.' });
+  }
+});
+
 app.use("/api/email-scraper", mailScraper);
 app.use("/", gmailSender);
 // app.use("/api/numberScraper", numberScraper);
