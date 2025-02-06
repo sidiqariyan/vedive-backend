@@ -288,8 +288,10 @@ app.get('/api/numberScraper', async (req, res) => {
     res.status(500).json({ error: 'An error occurred while scraping.' });
   }
 });
+
+// Serve the businesses.csv file for download
 app.get('/api/download', (req, res) => {
-  const filePath = path.join(__dirname, 'businesses.csv'); // Make sure the path is correct
+  const filePath = path.join(__dirname, 'businesses.csv'); // Path where CSV is saved
   res.download(filePath, 'businesses.csv', (err) => {
     if (err) {
       res.status(500).json({ error: 'Failed to download the file' });
