@@ -1,326 +1,132 @@
+require("dotenv").config();
 const express = require("express");
-const multer = require("multer");
+const http = require("http");
 const cors = require("cors");
-const fs = require("fs");
 const path = require("path");
-const xlsx = require("xlsx");
-const WebSocket = require("ws");
-const nodemailer = require("nodemailer");
-const { Client, LocalAuth } = require("whatsapp-web.js");
-const qrcode = require("qrcode");
-const mailScraper = require("./routes/scraper");
-const gmailSender = require("./routes/gmailSender");
-const { searchGoogleMaps } = require('./scraper'); 
-// const numberScraper = require("./scraper")
+const session = require("express-session");
+const passport = require("./middleware/googleAuth");
+const connectDB = require("./db");
+const jwt = require("jsonwebtoken");
+
 const app = express();
-const PORT = process.env.PORT || 3001;
-const server = require("http").createServer(app);
-const wss = new WebSocket.Server({ server });
+const server = http.createServer(app);
 
-// Configuration
-const MAX_MESSAGE_DELAY_MS = 2000; // 2 seconds between messages
-const ALLOWED_MIME_TYPES = ["text/html", "application/html"];
-
-app.use(cors());
+// Middleware
+app.use(cors({
+  origin: process.env.FRONTEND_URL || "http://localhost:5173", // Exact frontend origin
+  methods: ["GET", "POST", "PUT", "DELETE"],
+  allowedHeaders: ["Content-Type", "Authorization"],
+  credentials: true, // Enable credentials
+}));
 app.use(express.json());
+
+// Session Middleware
+app.use(
+  session({
+    secret: process.env.SESSION_SECRET || "your-secret-key",
+    resave: false,
+    saveUninitialized: true,
+    cookie: {
+      secure: process.env.NODE_ENV === "production", // Use `true` in production (HTTPS)
+      httpOnly: true,
+      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax", // Required for cross-origin cookies
+      maxAge: 24 * 60 * 60 * 1000, // Cookie expires in 24 hours
+    },
+  })
+);
+
+// Passport Initialization
+app.use(passport.initialize());
+app.use(passport.session());
+
+// Connect to MongoDB
+connectDB();
+
+// Static Files
 app.use(express.static(path.join(__dirname, "public")));
 
-// WhatsApp Client Setup
-const client = new Client({
-  authStrategy: new LocalAuth(),
-  puppeteer: { args: ["--no-sandbox", "--disable-setuid-sandbox"], headless: true },
-  takeoverOnConflict: true,
-  restartOnAuthFail: true
-});
+// Routes
+const authRoutes = require("./routes/authRoutes");
+const whatsappRoutes = require("./routes/whatsappRoutes");
+const emailRoutes = require("./routes/emailRoutes");
+const adminRoutes = require("./routes/adminRoutes");
+const mailScraper = require("./routes/scraper");
+const gmailSender = require("./routes/gmailSender");
+const postRoutes = require("./routes/postRoutes");
 
-client.on("qr", (qr) => {
-  qrcode.toDataURL(qr, (err, url) => {
-  wss.clients.forEach((ws) => {
-  if (ws.readyState === WebSocket.OPEN) {
-    ws.send(JSON.stringify({ type: "whatsapp_qr", data: url }));
-  }
-});
-  });
-});
+app.use("/api/auth", authRoutes);
+app.use("/api/whatsapp", whatsappRoutes);
+app.use("/api/emails", emailRoutes);
+app.use("/api/admin", adminRoutes);
+app.use("/api/email-scraper", mailScraper);
+app.use("/api", gmailSender);
+app.use("/api/posts", postRoutes);
 
-client.on("ready", () => {
-  console.log("WhatsApp Client ready");
-  broadcastStatus("WhatsApp Client ready");
-});
+// Google OAuth Routes
+app.get(
+  "/api/auth/google",
+  passport.authenticate("google", { scope: ["profile", "email"] })
+);
 
-client.on("disconnected", (reason) => {
-  console.log("WhatsApp Client disconnected:", reason);
-  broadcastStatus("Disconnected. Reinitializing...");
-  client.initialize();
-});
-
-if (!client.info?.user) {
-  return res.status(425).json({
-    error: "WhatsApp client not ready. Please authenticate first."
-  });
-}
-
-client.initialize();
-
-// Helpers
-function broadcastStatus(message) {
-  wss.clients.forEach((ws) => {
-    if (ws.readyState === WebSocket.OPEN) {
-      ws.send(JSON.stringify({
-        type: "status_update",
-        data: message
-      }));
+app.get(
+  "/api/auth/google/callback",
+  passport.authenticate("google", { session: false }), // Disable session for JWT-based auth
+  (req, res) => {
+    if (!req.user) {
+      return res.redirect(process.env.FRONTEND_URL || "http://localhost:5173/login");
     }
-  });
-}
 
-function validatePhoneNumber(phone) {
-  const cleaned = phone.replace(/[^0-9+]/g, "");
-  return cleaned.match(/^\+?[1-9]\d{6,14}$/);
-}
+    // Generate JWT token
+    const token = jwt.sign({ userId: req.user._id }, process.env.JWT_SECRET, { expiresIn: "1h" });
 
-// File Upload Setup
-const storage = multer.diskStorage({
-  destination: "./uploads/",
-  filename: (req, file, cb) => {
-    cb(null, `${Date.now()}-${file.originalname}`);
-  }
-});
-
-const upload = multer({
-  storage,
-  limits: { fileSize: 10 * 1024 * 1024 },
-  fileFilter: (req, file, cb) => {
-    if (file.fieldname === "htmlTemplate" && 
-        !ALLOWED_MIME_TYPES.includes(file.mimetype)) {
-      return cb(new Error("Invalid HTML template file type"));
-    }
-    cb(null, true);
-  }
-});
-
-// WhatsApp Message Endpoint
-app.post("/api/send-whatsapp", 
-  upload.fields([{ name: "contactsFile", maxCount: 1 }]),
-  async (req, res) => {
-    const results = { success: [], failures: [] };
-    
-    try {
-      // Validate client readiness
-      if (!client.info?.user) {
-        return res.status(425).json({ 
-          error: "WhatsApp client not ready. Please authenticate first." 
-        });
-      }
-
-      // Validate inputs
-      const { message } = req.body;
-      if (!message?.trim()) {
-        return res.status(400).json({ error: "Message content is required" });
-      }
-
-      // Process contacts file
-      const contactsFile = req.files?.contactsFile?.[0];
-      if (!contactsFile) {
-        return res.status(400).json({ error: "Contacts file is required" });
-      }
-
-      const workbook = xlsx.readFile(contactsFile.path);
-      const phoneNumbers = xlsx.utils.sheet_to_json(workbook.Sheets[workbook.SheetNames[0]])
-        .map(row => {
-          const phone = row.Phone?.toString().trim() || "";
-          return validatePhoneNumber(phone) ? `${phone.replace(/\D/g, "")}@c.us` : null;
-        })
-        .filter(Boolean);
-
-      if (phoneNumbers.length === 0) {
-        return res.status(400).json({ error: "No valid phone numbers found" });
-      }
-
-      // Send messages with rate limiting
-      for (const [index, number] of phoneNumbers.entries()) {
-        try {
-          await client.sendMessage(number, message);
-          results.success.push(number);
-          console.log(`Sent to ${number} (${index + 1}/${phoneNumbers.length})`);
-          
-          if (index < phoneNumbers.length - 1) {
-            await new Promise(resolve => setTimeout(resolve, MAX_MESSAGE_DELAY_MS));
-          }
-        } catch (error) {
-          results.failures.push({
-            number,
-            error: error.message
-          });
-          console.error(`Failed to send to ${number}:`, error.message);
-        }
-      }
-
-      res.json({
-        success: results.failures.length === 0,
-        sent: results.success.length,
-        failed: results.failures
-      });
-    } catch (error) {
-      console.error("WhatsApp send error:", error);
-      res.status(500).json({ 
-        error: "Internal server error",
-        details: error.message 
-      });
-    } finally {
-      if (req.files?.contactsFile) {
-        fs.unlinkSync(contactsFile.path);
-      }
-    }
+    // Redirect to frontend with token as query parameter
+    res.redirect(`${process.env.FRONTEND_URL || "http://localhost:5173/dashboard"}?token=${token}`);
   }
 );
 
-// Email Endpoint
-app.post("/api/send-bulk-mail",
-  upload.fields([
-    { name: "recipientsFile", maxCount: 1 },
-    { name: "htmlTemplate", maxCount: 1 }
-  ]),
-  async (req, res) => {
-    const results = { success: [], failures: [] };
-    let transporter;
-
-    try {
-      // Validate inputs
-      const requiredFields = [
-        "smtpHost", "smtpPort", "smtpUsername", 
-        "smtpPassword", "fromEmail", "emailSubject"
-      ];
-      
-      const missing = requiredFields.filter(field => !req.body[field]);
-      if (missing.length > 0) {
-        return res.status(400).json({
-          error: "Missing required fields",
-          missing
-        });
-      }
-
-      // Process files
-      const recipientsFile = req.files?.recipientsFile?.[0];
-      const htmlTemplateFile = req.files?.htmlTemplate?.[0];
-      
-      if (!recipientsFile || !htmlTemplateFile) {
-        return res.status(400).json({
-          error: "Both recipients file and HTML template are required"
-        });
-      }
-
-      // Validate email list
-      const recipients = fs.readFileSync(recipientsFile.path, "utf-8")
-        .split(/\r?\n/)
-        .map(email => email.trim())
-        .filter(email => email.match(/^[^\s@]+@[^\s@]+\.[^\s@]+$/));
-
-      if (recipients.length === 0) {
-        return res.status(400).json({ error: "No valid email addresses found" });
-      }
-
-      // Create transporter
-      transporter = nodemailer.createTransport({
-        host: req.body.smtpHost,
-        port: parseInt(req.body.smtpPort),
-        secure: req.body.smtpPort === "465",
-        auth: {
-          user: req.body.smtpUsername,
-          pass: req.body.smtpPassword
-        }
-      });
-
-      // Verify SMTP connection
-      await transporter.verify();
-
-      // Read template
-      const htmlContent = fs.readFileSync(htmlTemplateFile.path, "utf-8");
-
-      // Send emails
-      for (const recipient of recipients) {
-        try {
-          await transporter.sendMail({
-            from: `"${req.body.fromEmail}" <${req.body.smtpUsername}>`,
-            to: recipient,
-            subject: req.body.emailSubject,
-            html: htmlContent
-          });
-          results.success.push(recipient);
-          console.log(`Email sent to ${recipient}`);
-        } catch (error) {
-          results.failures.push({
-            recipient,
-            error: error.message
-          });
-          console.error(`Failed to send to ${recipient}:`, error.message);
-        }
-      }
-
-      res.json({
-        success: results.failures.length === 0,
-        sent: results.success.length,
-        failed: results.failures
-      });
-    } catch (error) {
-      console.error("Email send error:", error);
-      res.status(500).json({
-        error: "Failed to send emails",
-        details: error.message
-      });
-    } finally {
-      // Cleanup files
-      [recipientsFile, htmlTemplateFile].forEach(file => {
-        if (file?.path) fs.unlinkSync(file.path);
-      });
-      
-      // Close transporter
-      if (transporter) transporter.close();
+// Logout Route
+app.get("/api/auth/logout", (req, res) => {
+  req.logout((err) => {
+    if (err) {
+      console.error("Logout Error:", err);
     }
-  }
-);
+    res.redirect("/");
+  });
+});
+
+// Business Scraper Route
 app.get('/api/numberScraper', async (req, res) => {
-  const query = req.query.query; // Get the query parameter from the request URL
-
-  if (!query) {
-    return res.status(400).json({ error: 'Query parameter is required' });
-  }
-
+  const query = req.query.query;
+  if (!query) return res.status(400).json({ error: 'Query parameter is required' });
   try {
-    const businesses = await searchGoogleMaps(query); // Call the scraper function
-    res.json(businesses); // Send the scraped data as a JSON response
+    const businesses = await searchGoogleMaps(query);
+    return res.json(businesses);
   } catch (error) {
     console.error('Error in scraping:', error);
-    res.status(500).json({ error: 'An error occurred while scraping.' });
+    return res.status(500).json({ error: 'An error occurred while scraping.' });
   }
 });
 
-// Serve the businesses.csv file for download
+// Serve CSV File for Download
 app.get('/api/download', (req, res) => {
-  const filePath = path.join(__dirname, 'businesses.csv'); // Path where CSV is saved
+  const filePath = path.join(__dirname, 'businesses.csv');
   res.download(filePath, 'businesses.csv', (err) => {
     if (err) {
-      res.status(500).json({ error: 'Failed to download the file' });
+      console.error("File download error:", err);
+      return res.status(500).json({ error: 'Failed to download the file' });
     }
   });
 });
 
-
-app.use("/api/email-scraper", mailScraper);
-app.use("/", gmailSender);
-// app.use("/api/numberScraper", numberScraper);
-// Server Start
-server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  broadcastStatus("Server started");
+// Global Error Handling Middleware
+app.use((err, req, res, next) => {
+  console.error("Global Error Handler:", err.stack);
+  res.status(500).json({ error: "Internal Server Error" });
 });
 
-// Error Handling
-process.on("unhandledRejection", (reason, promise) => {
-  console.error("Unhandled Rejection at:", promise, "reason:", reason);
-});
-
-process.on("uncaughtException", (error) => {
-  console.error("Uncaught Exception:", error);
-  process.exit(1);
+// Start Server
+server.listen(process.env.PORT || 3000, () => {
+  console.log(`Server running on port ${process.env.PORT || 3000}`);
+}).on("error", (err) => {
+  console.error("Server failed to start:", err.message);
 });
