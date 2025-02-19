@@ -40,7 +40,5 @@ const campaignSchema = new mongoose.Schema({
   },
 });
 
-// Create the Campaign model
-const Campaign = mongoose.model('Campaign', campaignSchema);
-
-module.exports = Campaign;
+// Export the Campaign model
+module.exports = mongoose.models.Campaign || mongoose.model('Campaign', campaignSchema);

@@ -2,13 +2,18 @@ const express = require("express");
 const { scrapeEmails } = require("../services/scrapeService");
 const { generateCSV } = require("../utils/csvWriter");
 const pLimit = require("p-limit"); // Add rate limiting
-
+const Campaign = require("../models/Campaign"); // Import the Campaign model
 const router = express.Router();
 
+// API endpoint to scrape emails
 router.post("/", async (req, res) => {
-  const query = req.body.query || "contact email"; // Allow dynamic query input
-  const pages = req.body.pages || 2; // Allow dynamic page input
-  const customDomains = req.body.domains || []; // Allow user to add custom domains
+  const { query, pages, domains, campaignName } = req.body;
+
+  // Validate required fields
+  if (!query || !campaignName) {
+    return res.status(400).json({ error: "Query and Campaign Name are required" });
+  }
+
   const apiKey = "AIzaSyD_nVwEodt7Mg10vbXWEKXbMVLwBCVDfJI"; // Google API key provided by the user
   const cx = "a0280e6e13d584edb"; // Google Custom Search Engine ID
 
@@ -24,17 +29,14 @@ router.post("/", async (req, res) => {
     "@qmail.com", "@inbox.com",
   ];
 
-  const domains = [...new Set([...defaultDomains, ...customDomains])];
-  const domainQueries = domains.map((d) => `"${d}"`).join(" OR ");
-
-  if (!query) {
-    return res.status(400).json({ error: "Query is required" });
-  }
+  const customDomains = domains || [];
+  const allDomains = [...new Set([...defaultDomains, ...customDomains])];
+  const domainQueries = allDomains.map((d) => `"${d}"`).join(" OR ");
 
   try {
     console.log("Scraping process started...");
     const sites = req.body.sites || ["google.com", "instagram.com"];
-    
+
     const limit = pLimit(1); // Allow only 1 request at a time
     const emailPromises = sites.map((site) =>
       limit(() =>
@@ -55,8 +57,21 @@ router.post("/", async (req, res) => {
       return res.status(404).json({ message: "No emails found" });
     }
 
+    // Save campaign data to MongoDB
+    const newCampaign = new Campaign({
+      campaignName,
+      toolType: "email-scraper",
+      query,
+      domains: allDomains,
+      scrapedEmails: emails,
+    });
+
+    await newCampaign.save();
+
+    // Generate CSV file
     const csvPath = await generateCSV(emails);
 
+    // Send CSV file as a response
     res.setHeader("Content-Type", "application/octet-stream");
     res.setHeader("Content-Disposition", "attachment; filename=emails.csv");
     res.sendFile(csvPath, (err) => {
