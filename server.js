@@ -3,47 +3,51 @@ const express = require("express");
 const http = require("http");
 const cors = require("cors");
 const path = require("path");
-const session = require("express-session");
-const passport = require("./middleware/googleAuth");
+const fs = require("fs");
+const passport = require("passport");
 const connectDB = require("./db");
 const jwt = require("jsonwebtoken");
+
+// Import Google Auth setup
+const googleAuth = require("./middleware/googleAuth");
+
+// Import the authenticate middleware
+const { authenticate } = require("./middleware/authMiddleware");
 
 const app = express();
 const server = http.createServer(app);
 
 // Middleware
 app.use(cors({
-  origin: process.env.FRONTEND_URL || "http://localhost:5173", // Exact frontend origin
+  origin: function (origin, callback) {
+    const allowedOrigins = [process.env.FRONTEND_URL || "http://localhost:5173"];
+    if (!origin || allowedOrigins.includes(origin)) {
+      callback(null, true);
+    } else {
+      callback(new Error("Not allowed by CORS"));
+    }
+  },
   methods: ["GET", "POST", "PUT", "DELETE"],
   allowedHeaders: ["Content-Type", "Authorization"],
-  credentials: true, // Enable credentials
+  credentials: true,
 }));
 app.use(express.json());
 
-// Session Middleware
-app.use(
-  session({
-    secret: process.env.SESSION_SECRET || "your-secret-key",
-    resave: false,
-    saveUninitialized: true,
-    cookie: {
-      secure: process.env.NODE_ENV === "production", // Use `true` in production (HTTPS)
-      httpOnly: true,
-      sameSite: process.env.NODE_ENV === "production" ? "none" : "lax", // Required for cross-origin cookies
-      maxAge: 24 * 60 * 60 * 1000, // Cookie expires in 24 hours
-    },
-  })
-);
-
 // Passport Initialization
 app.use(passport.initialize());
-app.use(passport.session());
 
 // Connect to MongoDB
 connectDB();
 
 // Static Files
 app.use(express.static(path.join(__dirname, "public")));
+
+// Logging Middleware
+app.use((req, res, next) => {
+  console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`);
+  console.log("Headers:", req.headers);
+  next();
+});
 
 // Routes
 const authRoutes = require("./routes/authRoutes");
@@ -62,33 +66,15 @@ app.use("/api/email-scraper", mailScraper);
 app.use("/api", gmailSender);
 app.use("/api/posts", postRoutes);
 
-// Google OAuth Routes
-app.get(
-  "/api/auth/google",
-  passport.authenticate("google", { scope: ["profile", "email"] })
-);
-
-app.get(
-  "/api/auth/google/callback",
-  passport.authenticate("google", { session: false }), // Disable session for JWT-based auth
-  (req, res) => {
-    if (!req.user) {
-      return res.redirect(process.env.FRONTEND_URL || "http://localhost:5173/login");
-    }
-
-    // Generate JWT token
-    const token = jwt.sign({ userId: req.user._id }, process.env.JWT_SECRET, { expiresIn: "1h" });
-
-    // Redirect to frontend with token as query parameter
-    res.redirect(`${process.env.FRONTEND_URL || "http://localhost:5173/dashboard"}?token=${token}`);
-  }
-);
+// Initialize Google OAuth routes
+googleAuth(app);
 
 // Logout Route
 app.get("/api/auth/logout", (req, res) => {
   req.logout((err) => {
     if (err) {
       console.error("Logout Error:", err);
+      return res.status(500).json({ error: "Error logging out" });
     }
     res.redirect("/");
   });
@@ -98,6 +84,7 @@ app.get("/api/auth/logout", (req, res) => {
 app.get('/api/numberScraper', async (req, res) => {
   const query = req.query.query;
   if (!query) return res.status(400).json({ error: 'Query parameter is required' });
+
   try {
     const businesses = await searchGoogleMaps(query);
     return res.json(businesses);
@@ -109,18 +96,37 @@ app.get('/api/numberScraper', async (req, res) => {
 
 // Serve CSV File for Download
 app.get('/api/download', (req, res) => {
-  const filePath = path.join(__dirname, 'businesses.csv');
+  const filePath = path.join(__dirname, 'public', 'businesses.csv');
+
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({ error: "File not found" });
+  }
+
   res.download(filePath, 'businesses.csv', (err) => {
     if (err) {
       console.error("File download error:", err);
-      return res.status(500).json({ error: 'Failed to download the file' });
+      return res.status(500).json({ error: "Failed to download the file" });
     }
   });
+});
+
+// Protected Dashboard Route
+app.get("/api/dashboard", authenticate, (req, res) => {
+  res.json({ message: "Welcome to the dashboard!", user: req.user });
 });
 
 // Global Error Handling Middleware
 app.use((err, req, res, next) => {
   console.error("Global Error Handler:", err.stack);
+
+  if (err.name === 'ValidationError') {
+    return res.status(400).json({ error: "Bad Request", details: err.message });
+  }
+
+  if (err.name === 'UnauthorizedError') {
+    return res.status(401).json({ error: "Unauthorized" });
+  }
+
   res.status(500).json({ error: "Internal Server Error" });
 });
 

@@ -7,8 +7,8 @@ const router = express.Router();
 console.log("Authenticate Middleware:", authenticate);
 console.log("Authorize Middleware:", authorize);
 
-// Middleware to ensure only admins can access these routes
-router.use(authenticate, authorize(["admin"]));
+// Middleware to ensure only admins can access these routes router.use(authenticate, authorize(["admin"]));
+
 
 // Get all users (admin-only)
 router.get("/users", async (req, res) => {
