@@ -6,7 +6,6 @@ const path = require("path");
 const fs = require("fs");
 const passport = require("passport");
 const connectDB = require("./db");
-const jwt = require("jsonwebtoken");
 
 // Import Google Auth setup
 const googleAuth = require("./middleware/googleAuth");
@@ -44,15 +43,16 @@ app.use(express.static(path.join(__dirname, "public")));
 
 // Logging Middleware
 app.use((req, res, next) => {
-  console.log(`[${new Date().toISOString()}] ${req.method} ${req.originalUrl}`);
-  console.log("Headers:", req.headers);
+  console.log(`${req.method} ${req.originalUrl}`);
+  // console.log("Headers:", req.headers);
   next();
 });
 
 // Routes
 const authRoutes = require("./routes/authRoutes");
 const whatsappRoutes = require("./routes/whatsappRoutes");
-const emailRoutes = require("./routes/emailRoutes");
+// const emailRoutes = require("./routes/emailRoutes");
+const emailRoutes = require("./routes/bulkMailSender");
 const adminRoutes = require("./routes/adminRoutes");
 const mailScraper = require("./routes/scraper");
 const gmailSender = require("./routes/gmailSender");
@@ -60,7 +60,7 @@ const postRoutes = require("./routes/postRoutes");
 
 app.use("/api/auth", authRoutes);
 app.use("/api/whatsapp", whatsappRoutes);
-app.use("/api/emails", emailRoutes);
+app.use("/api", emailRoutes);
 app.use("/api/admin", adminRoutes);
 app.use("/api/email-scraper", mailScraper);
 app.use("/api", gmailSender);

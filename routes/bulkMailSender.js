@@ -2,7 +2,22 @@ const express = require('express');
 const multer = require('multer');
 const nodemailer = require('nodemailer');
 const fs = require('fs');
-const Campaign = require('../models/Campaign'); // Import the Campaign model
+const mongoose = require('mongoose');
+
+// Define Mongoose schema for campaigns
+const campaignSchema = new mongoose.Schema({
+  campaignName: String,
+  smtpHost: String,
+  smtpPort: Number,
+  smtpUsername: String,
+  smtpPassword: String,
+  fromEmail: String, // This will act as the display name
+  emailSubject: String,
+  recipients: [String],
+  createdAt: { type: Date, default: Date.now },
+});
+
+const Campaign = mongoose.model('Campaign', campaignSchema);
 
 const router = express.Router();
 
@@ -23,9 +38,9 @@ router.post(
         smtpPort,
         smtpUsername,
         smtpPassword,
-        fromEmail,
+        fromEmail, // This will act as the display name
         emailSubject,
-        campaignName, // Extract campaign name from request body
+        campaignName,
       } = req.body;
 
       // Validate required fields
@@ -70,21 +85,30 @@ router.post(
 
       await newCampaign.save();
 
+      // Construct the "from" field
+      const fromField = `"${fromEmail}" <${smtpUsername}>`;
+
       // Send emails to recipients
-      for (const recipient of recipients) {
+      const validRecipients = recipients.filter((email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email));
+      if (validRecipients.length === 0) {
+        return res.status(400).send('No valid email addresses found in recipients file.');
+      }
+
+      const sendPromises = validRecipients.map(async (recipient) => {
         try {
           await transporter.sendMail({
-            from: fromEmail,
+            from: fromField, // Use the constructed "from" field
             to: recipient,
             subject: emailSubject,
             html: emailBody,
           });
           console.log(`Email sent to ${recipient}`);
         } catch (err) {
-          console.error(`Failed to send email to ${recipient}:`, err);
-          return res.status(500).send(`Failed to send email to ${recipient}: ${err.message}`);
+          console.error(`Failed to send email to ${recipient}:`, err.message);
         }
-      }
+      });
+
+      await Promise.all(sendPromises);
 
       // Clean up uploaded files
       fs.unlinkSync(recipientsFile.path);
