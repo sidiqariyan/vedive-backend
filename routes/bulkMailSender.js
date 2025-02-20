@@ -4,20 +4,8 @@ const nodemailer = require('nodemailer');
 const fs = require('fs');
 const mongoose = require('mongoose');
 
-// Define Mongoose schema for campaigns
-const campaignSchema = new mongoose.Schema({
-  campaignName: String,
-  smtpHost: String,
-  smtpPort: Number,
-  smtpUsername: String,
-  smtpPassword: String,
-  fromEmail: String, // This will act as the display name
-  emailSubject: String,
-  recipients: [String],
-  createdAt: { type: Date, default: Date.now },
-});
-
-const Campaign = mongoose.model('Campaign', campaignSchema);
+// Import the Campaign model instead of redefining it
+const Campaign = require('../models/Campaign'); // Ensure this path is correct
 
 const router = express.Router();
 
@@ -74,6 +62,7 @@ router.post(
       // Save campaign data to MongoDB
       const newCampaign = new Campaign({
         campaignName,
+        toolType: "gmail-sender", // Add tool type to differentiate campaigns
         smtpHost,
         smtpPort: parseInt(smtpPort),
         smtpUsername,

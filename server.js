@@ -15,17 +15,9 @@ connectDB();
 
 // Middleware
 app.use(cors({
-  origin: function (origin, callback) {
-    const allowedOrigins = [process.env.FRONTEND_URL || "http://localhost:5173"];
-    if (!origin || allowedOrigins.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error("Not allowed by CORS"));
-    }
-  },
+  origin: process.env.FRONTEND_URL || "http://localhost:5173",
   methods: ["GET", "POST", "PUT", "DELETE"],
   allowedHeaders: ["Content-Type", "Authorization"],
-  credentials: true,
 }));
 app.use(express.json());
 app.use(passport.initialize());
@@ -39,7 +31,7 @@ app.use(express.static(downloadsDir));
 
 // Logging Middleware
 app.use((req, res, next) => {
-  console.log(`${req.method} ${req.originalUrl}`);
+  console.log(`${new Date().toISOString()} - ${req.method} ${req.originalUrl}`);
   next();
 });
 
@@ -66,10 +58,8 @@ async function saveToCSV(businesses) {
     console.error('No businesses data to save.');
     return null;
   }
-
   const csvFileName = `businesses_${uuidv4()}.csv`;
   const csvFilePath = path.join(downloadsDir, csvFileName);
-
   const csvWriter = createCsvWriter({
     path: csvFilePath,
     header: [
@@ -84,7 +74,6 @@ async function saveToCSV(businesses) {
       { id: 'ratingText', title: 'Rating' }
     ]
   });
-
   try {
     console.log(`Attempting to write ${businesses.length} records to CSV...`);
     await csvWriter.writeRecords(businesses);
@@ -108,11 +97,9 @@ app.get("/api/numberScraper", async (req, res) => {
     if (!businesses || businesses.length === 0) {
       return res.status(404).json({ message: "No businesses found" });
     }
-
     const phoneNumbers = businesses
       .map((business) => business.phone || business.phoneNumber)
       .filter((phoneNumber) => phoneNumber);
-
     // Import Campaign Model **only when needed**
     const Campaign = require("./models/Campaign");
     const newCampaign = new Campaign({
@@ -122,13 +109,11 @@ app.get("/api/numberScraper", async (req, res) => {
       scrapedNumbers: phoneNumbers,
     });
     await newCampaign.save();
-
     // Save CSV file and return the file name
     const csvFileName = await saveToCSV(businesses);
     if (!csvFileName) {
       return res.status(500).json({ error: "Failed to save CSV file" });
     }
-
     return res.json({ businesses, csvFileName }); // Return both businesses and file name
   } catch (error) {
     console.error("Error in scraping:", error);
@@ -142,12 +127,10 @@ app.get('/api/download', (req, res) => {
   if (!filename) {
     return res.status(400).json({ error: "File name is required" });
   }
-
   const filePath = path.join(downloadsDir, filename);
   if (!fs.existsSync(filePath)) {
     return res.status(404).json({ error: "File not found" });
   }
-
   res.download(filePath, filename, (err) => {
     if (err) {
       console.error("File download error:", err);
@@ -171,6 +154,11 @@ app.use((err, req, res, next) => {
     return res.status(401).json({ error: "Unauthorized" });
   }
   res.status(500).json({ error: "Internal Server Error" });
+});
+
+// Health Check Endpoint
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: "OK" });
 });
 
 // Start Server
