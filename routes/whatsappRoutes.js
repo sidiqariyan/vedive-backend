@@ -5,7 +5,10 @@ const QRCode = require('qrcode');
 const path = require('path');
 const fs = require('fs');
 const jwt = require('jsonwebtoken');
-const { authenticate } = require("../middleware/authMiddleware"); // Import the authenticate middleware
+const mongoose = require('mongoose');
+const { parsePhoneNumberFromString } = require('libphonenumber-js');  // Added phone number validation
+const Campaign = require("../models/Campaign");  // Import the Campaign model
+const { authenticate } = require("../middleware/authMiddleware");  // Import the authenticate middleware
 const router = express.Router();
 
 // Debugging log
@@ -18,7 +21,7 @@ if (!fs.existsSync(dir)) {
 }
 
 // Database simulation (replace with actual database)
-const usersDb = {}; // { userId: { client, qrCodeData, isAuthenticated } }
+const usersDb = {};  // { userId: { client, qrCodeData, isAuthenticated } }
 
 // Multer configuration for media uploads
 const storage = multer.diskStorage({
@@ -29,7 +32,17 @@ const storage = multer.diskStorage({
     cb(null, Date.now() + path.extname(file.originalname));
   }
 });
-const upload = multer({ storage: storage });
+const upload = multer({ 
+  storage: storage,
+  limits: { fileSize: 10 * 1024 * 1024 },  // Limit file size to 10 MB
+  fileFilter: (req, file, cb) => {
+    const allowedTypes = ['image/jpeg', 'image/png', 'application/pdf'];  // Allowed file types
+    if (!allowedTypes.includes(file.mimetype)) {
+      return cb(new Error('Invalid file type. Only JPEG, PNG, and PDF are allowed.'));
+    }
+    cb(null, true);
+  }
+});
 
 // Helper function to initialize a WhatsApp client for a user
 function initializeClient(userId) {
@@ -39,17 +52,17 @@ function initializeClient(userId) {
   });
   client.on('qr', async (qr) => {
     console.log(`QR RECEIVED for user ${userId}`);
-    usersDb[userId].qrCodeData = await QRCode.toDataURL(qr); // Convert QR code to base64 image
+    usersDb[userId].qrCodeData = await QRCode.toDataURL(qr);  // Convert QR code to base64 image
   });
   client.on('ready', () => {
     console.log(`Client is ready for user ${userId}!`);
     usersDb[userId].isAuthenticated = true;
-    usersDb[userId].qrCodeData = ''; // Clear QR code once authenticated
-    usersDb[userId].session = client.getSession(); // Save session for future use
+    usersDb[userId].qrCodeData = '';  // Clear QR code once authenticated
+    usersDb[userId].session = client.getSession();  // Save session for future use
   });
   client.on('disconnected', () => {
     console.log(`Client disconnected for user ${userId}`);
-    delete usersDb[userId]; // Remove user from the database
+    delete usersDb[userId];  // Remove user from the database
   });
   client.initialize();
   return client;
@@ -57,7 +70,7 @@ function initializeClient(userId) {
 
 // Route to get QR code for a specific user
 router.get('/qr', authenticate, (req, res) => {
-  const userId = req.user.email; // Use email as userId
+  const userId = req.user.email;  // Use email as userId
   if (!usersDb[userId]) {
     usersDb[userId] = { client: initializeClient(userId), qrCodeData: '', isAuthenticated: false };
   }
@@ -73,30 +86,65 @@ router.get('/qr', authenticate, (req, res) => {
 
 // Route to send messages
 router.post('/send', authenticate, upload.single('media'), async (req, res) => {
-  const userId = req.user.email; // Use email as userId
-  const { users, message } = req.body;
+  const userId = req.user.email;  // Use email as userId
+  const { users, message, campaignName } = req.body;  // Add campaignName to the request body
   const mediaFile = req.file;
+
+  // Validate required fields
+  if (!users || !message || !campaignName) {
+    return res.status(400).json({ error: 'Please provide users, message, and campaign name.' });
+  }
+
   if (!usersDb[userId] || !usersDb[userId].isAuthenticated) {
     return res.status(400).json({ error: 'User is not authenticated.' });
   }
-  if (!users || !message) {
-    return res.status(400).json({ error: 'Please provide both users and message.' });
-  }
+
   const userArray = users.split('\n').map(user => user.trim()).filter(user => user);
+
+  // Validate phone numbers
+  const invalidUsers = [];
+  for (const user of userArray) {
+    const phoneNumber = parsePhoneNumberFromString(user, 'IN');  // Validate phone number (replace 'IN' with the country code)
+    if (!phoneNumber || !phoneNumber.isValid()) {
+      invalidUsers.push(user);
+    }
+  }
+
+  if (invalidUsers.length > 0) {
+    return res.status(400).json({ error: `Invalid phone numbers: ${invalidUsers.join(', ')}` });
+  }
+
   const client = usersDb[userId].client;
+
   try {
+    const sentMessages = [];
+
     for (const user of userArray) {
-      const phoneNumber = user.replace(/\D/g, ''); // Remove non-numeric characters
+      const phoneNumber = user.replace(/\D/g, '');  // Remove non-numeric characters
       const chatId = `${phoneNumber}@c.us`;
+
       if (mediaFile) {
         const mediaPath = mediaFile.path;
-        const media = await client.sendMessage(chatId, mediaPath);
+        await client.sendMessage(chatId, mediaPath);
         await client.sendMessage(chatId, message);
       } else {
         await client.sendMessage(chatId, message);
       }
+
+      sentMessages.push(phoneNumber);
     }
-    res.json({ message: 'Messages sent successfully!' });
+
+    // Save campaign data to MongoDB
+    const newCampaign = new Campaign({
+      campaignName,
+      toolType: "whatsapp-bulk-sender",  // Associate this campaign with the WhatsApp bulk sender tool
+      messageContent: message,
+      recipients: sentMessages,
+    });
+
+    await newCampaign.save();
+
+    res.json({ message: 'Messages sent successfully!', sentMessages });
   } catch (error) {
     console.error(error);
     res.status(500).json({ error: 'Error sending messages.' });
