@@ -39,60 +39,21 @@ app.use((req, res, next) => {
 
 // Routes
 app.use("/api/auth", require("./routes/authRoutes"));
-app.use("/api/whatsapp", require("./routes/whatsappRoutes"));
-app.use("/api", require("./routes/bulkMailSender"));
 app.use("/api/admin", require("./routes/adminRoutes"));
-app.use("/api/email-scraper", require("./routes/scraper"));
-app.use("/api", require("./routes/gmailSender"));
 app.use("/api/posts", require("./routes/postRoutes"));
 
 // Apply authenticate middleware to protected routes
 app.use("/api/dashboard", authenticate, require("./routes/dashboardRoutes")); // Dashboard route
 app.use("/api/campaigns", authenticate, require("./routes/campaignRoutes")); // Campaigns route
 
-// Initialize Google OAuth routes
-require("./middleware/googleAuth")(app);
+// Protect all tool-related routes with the authenticate middleware
+app.use("/api/whatsapp", authenticate, require("./routes/whatsappRoutes"));
+app.use("/api/email-scraper", authenticate, require("./routes/scraper"));
+app.use("/api/gmailSender", authenticate, require("./routes/gmailSender"));
+app.use("/api/bulkMailSender", authenticate, require("./routes/bulkMailSender"));
 
-// Import Scraper Function
-const { searchGoogleMaps } = require("./routes/NumberScraper");
-const createCsvWriter = require('csv-writer').createObjectCsvWriter;
-const { v4: uuidv4 } = require('uuid');
-
-// Save businesses to a CSV file in the public directory
-async function saveToCSV(businesses) {
-  if (!Array.isArray(businesses) || businesses.length === 0) {
-    console.error('No businesses data to save.');
-    return null;
-  }
-  const csvFileName = `businesses_${uuidv4()}.csv`;
-  const csvFilePath = path.join(downloadsDir, csvFileName);
-  const csvWriter = createCsvWriter({
-    path: csvFilePath,
-    header: [
-      { id: 'index', title: 'Index' },
-      { id: 'storeName', title: 'Store Name' },
-      { id: 'placeId', title: 'Place ID' },
-      { id: 'address', title: 'Address' },
-      { id: 'category', title: 'Category' },
-      { id: 'phone', title: 'Phone' },
-      { id: 'googleUrl', title: 'Google URL' },
-      { id: 'bizWebsite', title: 'Business Website' },
-      { id: 'ratingText', title: 'Rating' }
-    ]
-  });
-  try {
-    console.log(`Attempting to write ${businesses.length} records to CSV...`);
-    await csvWriter.writeRecords(businesses);
-    console.log(`The CSV file "${csvFilePath}" was written successfully.`);
-    return csvFileName; // Return the file name for reference
-  } catch (error) {
-    console.error('Error writing CSV file:', error.message);
-    return null;
-  }
-}
-
-// Number Scraper Route
-app.get("/api/numberScraper", async (req, res) => {
+// Number Scraper Route (Protected)
+app.get("/api/numberScraper", authenticate, async (req, res) => {
   const { query, campaignName } = req.query;
 
   // Validate required fields
@@ -137,8 +98,8 @@ app.get("/api/numberScraper", async (req, res) => {
   }
 });
 
-// Serve CSV File for Download
-app.get('/api/download', (req, res) => {
+// Serve CSV File for Download (Protected)
+app.get('/api/download', authenticate, (req, res) => {
   const { filename } = req.query;
   if (!filename) {
     return res.status(400).json({ error: "File name is required" });
@@ -154,6 +115,47 @@ app.get('/api/download', (req, res) => {
     }
   });
 });
+
+// Initialize Google OAuth routes
+require("./middleware/googleAuth")(app);
+
+// Import Scraper Function
+const { searchGoogleMaps } = require("./routes/NumberScraper");
+const createCsvWriter = require('csv-writer').createObjectCsvWriter;
+const { v4: uuidv4 } = require('uuid');
+
+// Save businesses to a CSV file in the public directory
+async function saveToCSV(businesses) {
+  if (!Array.isArray(businesses) || businesses.length === 0) {
+    console.error('No businesses data to save.');
+    return null;
+  }
+  const csvFileName = `businesses_${uuidv4()}.csv`;
+  const csvFilePath = path.join(downloadsDir, csvFileName);
+  const csvWriter = createCsvWriter({
+    path: csvFilePath,
+    header: [
+      { id: 'index', title: 'Index' },
+      { id: 'storeName', title: 'Store Name' },
+      { id: 'placeId', title: 'Place ID' },
+      { id: 'address', title: 'Address' },
+      { id: 'category', title: 'Category' },
+      { id: 'phone', title: 'Phone' },
+      { id: 'googleUrl', title: 'Google URL' },
+      { id: 'bizWebsite', title: 'Business Website' },
+      { id: 'ratingText', title: 'Rating' }
+    ]
+  });
+  try {
+    console.log(`Attempting to write ${businesses.length} records to CSV...`);
+    await csvWriter.writeRecords(businesses);
+    console.log(`The CSV file "${csvFilePath}" was written successfully.`);
+    return csvFileName; // Return the file name for reference
+  } catch (error) {
+    console.error('Error writing CSV file:', error.message);
+    return null;
+  }
+}
 
 // Global Error Handling Middleware
 app.use((err, req, res, next) => {
