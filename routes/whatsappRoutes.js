@@ -31,6 +31,7 @@ const storage = multer.diskStorage({
     cb(null, Date.now() + path.extname(file.originalname));
   }
 });
+
 const upload = multer({
   storage: storage,
   limits: { fileSize: 10 * 1024 * 1024 }, // Limit file size to 10 MB
@@ -74,10 +75,13 @@ function initializeClient(userId) {
 // Route to get QR code for a specific user
 router.get('/qr', (req, res) => {
   const userId = "defaultUser"; // Use a default user ID since there's no authentication
+
   if (!usersDb[userId]) {
     usersDb[userId] = { client: initializeClient(userId), qrCodeData: '', isAuthenticated: false };
   }
+
   const user = usersDb[userId];
+
   if (user.qrCodeData) {
     res.json({ qrCode: user.qrCodeData });
   } else if (user.isAuthenticated) {
@@ -118,11 +122,14 @@ router.post('/send', upload.single('media'), async (req, res) => {
   }
 
   const client = usersDb[userId].client;
+
   try {
     const sentMessages = [];
+
     for (const user of userArray) {
       const phoneNumber = user.replace(/\D/g, ''); // Remove non-numeric characters
       const chatId = `${phoneNumber}@c.us`;
+
       if (mediaFile) {
         const mediaPath = mediaFile.path;
         await client.sendMessage(chatId, mediaPath);
@@ -130,16 +137,18 @@ router.post('/send', upload.single('media'), async (req, res) => {
       } else {
         await client.sendMessage(chatId, message);
       }
+
       sentMessages.push(phoneNumber);
     }
 
     // Save campaign data to MongoDB
     const newCampaign = new Campaign({
       campaignName,
-      toolType: "whatsapp-bulk-sender",
+      toolType: "whatsapp-bulk-sender", // Static name for the WhatsApp Bulk Sender tool
       messageContent: message,
       recipients: sentMessages,
     });
+
     await newCampaign.save();
 
     res.json({ message: 'Messages sent successfully!', sentMessages });

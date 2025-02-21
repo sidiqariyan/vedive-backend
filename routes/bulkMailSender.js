@@ -3,10 +3,7 @@ const multer = require('multer');
 const nodemailer = require('nodemailer');
 const fs = require('fs');
 const mongoose = require('mongoose');
-
-// Import the Campaign model instead of redefining it
-const Campaign = require('../models/Campaign'); // Ensure this path is correct
-
+const Campaign = require('../models/Campaign'); // Import the Campaign model
 const router = express.Router();
 
 // Multer setup for file uploads
@@ -16,8 +13,8 @@ const upload = multer({ dest: 'uploads/' });
 router.post(
   '/send-bulk-mail',
   upload.fields([
-    { name: 'recipientsFile' },
-    { name: 'htmlTemplate' },
+    { name: 'recipientsFile' }, // File containing recipient email addresses
+    { name: 'htmlTemplate' },   // HTML template for the email body
   ]),
   async (req, res) => {
     try {
@@ -26,7 +23,7 @@ router.post(
         smtpPort,
         smtpUsername,
         smtpPassword,
-        fromEmail, // This will act as the display name
+        fromEmail, // Display name for the sender
         emailSubject,
         campaignName,
       } = req.body;
@@ -36,6 +33,7 @@ router.post(
         return res.status(400).send('Missing required SMTP, email, or campaign details.');
       }
 
+      // Validate uploaded files
       const recipientsFile = req.files?.recipientsFile?.[0];
       const htmlTemplateFile = req.files?.htmlTemplate?.[0];
 
@@ -52,7 +50,7 @@ router.post(
       const transporter = nodemailer.createTransport({
         host: smtpHost,
         port: parseInt(smtpPort),
-        secure: smtpPort == 465,
+        secure: smtpPort == 465, // Use secure connection for port 465
         auth: {
           user: smtpUsername,
           pass: smtpPassword,
@@ -62,7 +60,7 @@ router.post(
       // Save campaign data to MongoDB
       const newCampaign = new Campaign({
         campaignName,
-        toolType: "gmail-sender", // Add tool type to differentiate campaigns
+        toolType: "mail-sender", // Static name for the Gmail sender tool
         smtpHost,
         smtpPort: parseInt(smtpPort),
         smtpUsername,
@@ -74,15 +72,16 @@ router.post(
 
       await newCampaign.save();
 
-      // Construct the "from" field
+      // Construct the "from" field with display name
       const fromField = `"${fromEmail}" <${smtpUsername}>`;
 
-      // Send emails to recipients
+      // Filter valid email addresses
       const validRecipients = recipients.filter((email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email));
       if (validRecipients.length === 0) {
         return res.status(400).send('No valid email addresses found in recipients file.');
       }
 
+      // Send emails to valid recipients
       const sendPromises = validRecipients.map(async (recipient) => {
         try {
           await transporter.sendMail({

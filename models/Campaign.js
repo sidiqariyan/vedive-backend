@@ -3,7 +3,7 @@ const mongoose = require("mongoose");
 // Define the campaign schema
 const campaignSchema = new mongoose.Schema({
   campaignName: { type: String, required: true },
-  toolType: { type: String, required: true, enum: ["gmail-sender", "number-scraper", "whatsapp-bulk-sender"] },
+  toolType: { type: String, required: true, enum: ["gmail-sender", "number-scraper", "mail-sender","whatsapp-bulk-sender","email-scraper"] },
   smtpHost: { type: String },
   smtpPort: { type: Number },
   smtpUsername: { type: String },
@@ -13,7 +13,7 @@ const campaignSchema = new mongoose.Schema({
   recipients: { type: [String] },
   query: { type: String },
   scrapedNumbers: { type: [String] },
-  messageContent: { type: String }, // For WhatsApp messages
+  messageContent: { type: String },
   createdAt: { type: Date, default: Date.now },
 });
 

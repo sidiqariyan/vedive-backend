@@ -2,6 +2,7 @@ const express = require("express");
 const { scrapeEmails } = require("../services/scrapeService");
 const { generateCSV } = require("../utils/csvWriter");
 const pLimit = require("p-limit"); // Add rate limiting
+const mongoose = require("mongoose");
 const Campaign = require("../models/Campaign"); // Import the Campaign model
 const router = express.Router();
 
@@ -21,6 +22,7 @@ router.post("/", async (req, res) => {
     return res.status(400).json({ error: "API key and CX (Custom Search Engine ID) are required" });
   }
 
+  // Define default email domains
   const defaultDomains = [
     "@gmail.com", "@yahoo.com", "@hotmail.com", "@icloud.com",
     "@aol.com", "@email.com", "@protonmail.com", "@zoho.com",
@@ -29,15 +31,21 @@ router.post("/", async (req, res) => {
     "@qmail.com", "@inbox.com",
   ];
 
+  // Merge default domains with custom domains (if provided)
   const customDomains = domains || [];
   const allDomains = [...new Set([...defaultDomains, ...customDomains])];
   const domainQueries = allDomains.map((d) => `"${d}"`).join(" OR ");
 
   try {
     console.log("Scraping process started...");
+
+    // Define sites to scrape (default or user-provided)
     const sites = req.body.sites || ["google.com", "instagram.com"];
 
+    // Rate limit to avoid hitting API limits
     const limit = pLimit(1); // Allow only 1 request at a time
+
+    // Scrape emails from each site
     const emailPromises = sites.map((site) =>
       limit(() =>
         scrapeEmails(`${query} (${domainQueries})`, [site], apiKey, cx, pages).catch((err) => {
@@ -60,7 +68,7 @@ router.post("/", async (req, res) => {
     // Save campaign data to MongoDB
     const newCampaign = new Campaign({
       campaignName,
-      toolType: "email-scraper",
+      toolType: "email-scraper", // Static name for the Email Scraper tool
       query,
       domains: allDomains,
       scrapedEmails: emails,

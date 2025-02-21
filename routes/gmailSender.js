@@ -4,6 +4,7 @@ const nodemailer = require("nodemailer");
 const mongoose = require("mongoose");
 const Campaign = require("../models/Campaign"); // Import the Campaign model
 
+// API endpoint to send Gmail emails
 router.post("/send-gmail", async (req, res) => {
     const { gmail, appPassword, from, subject, contacts, body, campaignName } = req.body;
 
@@ -51,7 +52,7 @@ router.post("/send-gmail", async (req, res) => {
         // Save campaign data to MongoDB
         const newCampaign = new Campaign({
             campaignName,
-            toolType: "gmail-sender", // Associate this campaign with the Gmail tool
+            toolType: "gmail-sender", // Static name for the Gmail sender tool
             smtpHost: "smtp.gmail.com", // Gmail's SMTP host
             smtpPort: 587, // Gmail's SMTP port
             smtpUsername: gmail,
