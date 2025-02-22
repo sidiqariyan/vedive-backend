@@ -7,8 +7,7 @@ const fs = require("fs");
 const passport = require("passport");
 const connectDB = require("./db");
 const { authenticate } = require("./middleware/authMiddleware");
-const User = require("./models/User"); // Import the User model
-const Campaign = require("./models/Campaign"); // Import the Campaign model
+
 const app = express();
 const server = http.createServer(app);
 
@@ -25,9 +24,9 @@ app.use(express.json());
 app.use(passport.initialize());
 
 // Static Files
-const downloadsDir = path.join(__dirname, "public"); // Ensure public folder exists
+const downloadsDir = path.join(__dirname, "public");
 if (!fs.existsSync(downloadsDir)) {
-  fs.mkdirSync(downloadsDir); // Create the directory if it doesn't exist
+  fs.mkdirSync(downloadsDir);
 }
 app.use(express.static(downloadsDir));
 
@@ -39,82 +38,12 @@ app.use((req, res, next) => {
 
 // Routes
 app.use("/api/auth", require("./routes/authRoutes"));
+app.use("/api/whatsapp", require("./routes/whatsappRoutes"));
+app.use("/api", require("./routes/bulkMailSender"));
 app.use("/api/admin", require("./routes/adminRoutes"));
+app.use("/api/email-scraper", require("./routes/scraper"));
+app.use("/api", require("./routes/gmailSender"));
 app.use("/api/posts", require("./routes/postRoutes"));
-
-// Apply authenticate middleware to protected routes
-app.use("/api/dashboard", authenticate, require("./routes/dashboardRoutes")); // Dashboard route
-app.use("/api/campaigns", authenticate, require("./routes/campaignRoutes")); // Campaigns route
-
-// Protect all tool-related routes with the authenticate middleware
-app.use("/api/whatsapp", authenticate, require("./routes/whatsappRoutes"));
-app.use("/api/email-scraper", authenticate, require("./routes/scraper"));
-app.use("/api/gmailSender", authenticate, require("./routes/gmailSender"));
-app.use("/api/bulkMailSender", authenticate, require("./routes/bulkMailSender"));
-
-// Number Scraper Route (Protected)
-app.get("/api/numberScraper", authenticate, async (req, res) => {
-  const { query, campaignName } = req.query;
-
-  // Validate required fields
-  if (!query || !campaignName) {
-    return res.status(400).json({ error: "Query and Campaign Name are required" });
-  }
-
-  try {
-    console.log("Scraping process started...");
-    const businesses = await searchGoogleMaps(query);
-
-    if (!businesses || businesses.length === 0) {
-      return res.status(404).json({ message: "No businesses found" });
-    }
-
-    // Extract phone numbers from businesses
-    const phoneNumbers = businesses
-      .map((business) => business.phone || business.phoneNumber)
-      .filter((phoneNumber) => phoneNumber);
-
-    // Save campaign data to MongoDB
-    const newCampaign = new Campaign({
-      campaignName,
-      toolType: "number-scraper", // Static name for the Number Scraper tool
-      query,
-      scrapedNumbers: phoneNumbers,
-      userId: req.user._id, // Associate the campaign with the logged-in user
-    });
-
-    await newCampaign.save();
-
-    // Save CSV file and return the file name
-    const csvFileName = await saveToCSV(businesses);
-    if (!csvFileName) {
-      return res.status(500).json({ error: "Failed to save CSV file" });
-    }
-
-    return res.json({ businesses, csvFileName }); // Return both businesses and file name
-  } catch (error) {
-    console.error("Error in scraping:", error);
-    return res.status(500).json({ error: "An error occurred while scraping." });
-  }
-});
-
-// Serve CSV File for Download (Protected)
-app.get('/api/download', authenticate, (req, res) => {
-  const { filename } = req.query;
-  if (!filename) {
-    return res.status(400).json({ error: "File name is required" });
-  }
-  const filePath = path.join(downloadsDir, filename);
-  if (!fs.existsSync(filePath)) {
-    return res.status(404).json({ error: "File not found" });
-  }
-  res.download(filePath, filename, (err) => {
-    if (err) {
-      console.error("File download error:", err);
-      return res.status(500).json({ error: "Failed to download the file" });
-    }
-  });
-});
 
 // Initialize Google OAuth routes
 require("./middleware/googleAuth")(app);
@@ -130,8 +59,10 @@ async function saveToCSV(businesses) {
     console.error('No businesses data to save.');
     return null;
   }
+
   const csvFileName = `businesses_${uuidv4()}.csv`;
   const csvFilePath = path.join(downloadsDir, csvFileName);
+
   const csvWriter = createCsvWriter({
     path: csvFilePath,
     header: [
@@ -146,16 +77,84 @@ async function saveToCSV(businesses) {
       { id: 'ratingText', title: 'Rating' }
     ]
   });
+
   try {
     console.log(`Attempting to write ${businesses.length} records to CSV...`);
     await csvWriter.writeRecords(businesses);
     console.log(`The CSV file "${csvFilePath}" was written successfully.`);
-    return csvFileName; // Return the file name for reference
+    return csvFileName;
   } catch (error) {
     console.error('Error writing CSV file:', error.message);
     return null;
   }
 }
+
+// Number Scraper Route
+app.get("/api/numberScraper", async (req, res) => {
+  const { query, campaignName } = req.query;
+  if (!query || !campaignName) {
+    return res.status(400).json({ error: "Query and Campaign Name are required" });
+  }
+
+  try {
+    console.log("Scraping process started...");
+    const businesses = await searchGoogleMaps(query);
+    if (!businesses || businesses.length === 0) {
+      return res.status(404).json({ message: "No businesses found" });
+    }
+
+    const phoneNumbers = businesses
+      .map((business) => business.phone || business.phoneNumber)
+      .filter((phoneNumber) => phoneNumber);
+
+    // Import Campaign Model only when needed
+    const Campaign = require("./models/Campaign");
+    const newCampaign = new Campaign({
+      campaignName,
+      toolType: "number-scraper",
+      query,
+      scrapedNumbers: phoneNumbers,
+    });
+
+    await newCampaign.save();
+
+    // Save CSV file and return the file name
+    const csvFileName = await saveToCSV(businesses);
+    if (!csvFileName) {
+      return res.status(500).json({ error: "Failed to save CSV file" });
+    }
+
+    return res.json({ businesses, csvFileName });
+  } catch (error) {
+    console.error("Error in scraping:", error);
+    return res.status(500).json({ error: "An error occurred while scraping." });
+  }
+});
+
+// Serve CSV File for Download
+app.get('/api/download', (req, res) => {
+  const { filename } = req.query;
+  if (!filename) {
+    return res.status(400).json({ error: "File name is required" });
+  }
+
+  const filePath = path.join(downloadsDir, filename);
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({ error: "File not found" });
+  }
+
+  res.download(filePath, filename, (err) => {
+    if (err) {
+      console.error("File download error:", err);
+      return res.status(500).json({ error: "Failed to download the file" });
+    }
+  });
+});
+
+// Protected Dashboard Route
+app.get("/api/dashboard", authenticate, (req, res) => {
+  res.json({ message: "Welcome to the dashboard!", user: req.user });
+});
 
 // Global Error Handling Middleware
 app.use((err, req, res, next) => {
@@ -170,13 +169,8 @@ app.use((err, req, res, next) => {
 });
 
 // Health Check Endpoint
-app.get('/health', async (req, res) => {
-  try {
-    await mongoose.connection.db.admin().ping(); // Check MongoDB connection
-    res.status(200).json({ status: "OK", dbStatus: "Connected" });
-  } catch (error) {
-    res.status(500).json({ status: "Error", dbStatus: "Disconnected" });
-  }
+app.get('/health', (req, res) => {
+  res.status(200).json({ status: "OK" });
 });
 
 // Start Server

@@ -20,41 +20,35 @@ router.post("/send-gmail", async (req, res) => {
     });
 
     // Function to send an email
-    const sendEmail = (contact) => {
-        return new Promise((resolve, reject) => {
+    const sendEmail = async (contact) => {
+        try {
             const mailOptions = { from, to: contact, subject, html: body };
-            transporter.sendMail(mailOptions, (error, info) => {
-                if (error) {
-                    console.error(`Failed to send email to ${contact}:`, error);
-                    return reject(error);
-                }
-                console.log(`Email sent to ${contact}: ${info.response}`);
-                resolve(info.response);
-            });
-        });
+            const info = await transporter.sendMail(mailOptions);
+            console.log(`Email sent to ${contact}: ${info.response}`);
+            return { contact, status: "success", response: info.response };
+        } catch (error) {
+            console.error(`Failed to send email to ${contact}:`, error);
+            return { contact, status: "failed", error: error.message };
+        }
     };
 
     try {
-        // Send emails with a delay between each
-        const results = await Promise.allSettled(
-            contacts.map((contact, index) =>
-                new Promise((resolve) =>
-                    setTimeout(() => resolve(sendEmail(contact)), index * 2000)
-                )
-            )
-        );
+        let results = [];
+        for (let i = 0; i < contacts.length; i++) {
+            const result = await sendEmail(contacts[i]);
+            results.push(result);
+            await new Promise((resolve) => setTimeout(resolve, 2000)); // Delay between emails
+        }
 
         // Collect failed emails
-        const failedEmails = results
-            .filter((result) => result.status === "rejected")
-            .map((result) => result.reason);
+        const failedEmails = results.filter((result) => result.status === "failed");
 
         // Save campaign data to MongoDB
         const newCampaign = new Campaign({
             campaignName,
-            toolType: "gmail-sender", // Static name for the Gmail sender tool
-            smtpHost: "smtp.gmail.com", // Gmail's SMTP host
-            smtpPort: 587, // Gmail's SMTP port
+            toolType: "gmail-sender",
+            smtpHost: "smtp.gmail.com",
+            smtpPort: 587,
             smtpUsername: gmail,
             smtpPassword: appPassword,
             fromEmail: from,
