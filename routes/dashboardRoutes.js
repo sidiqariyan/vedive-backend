@@ -7,12 +7,14 @@ const { authenticate } = require("../middleware/authMiddleware");
 router.get("/dashboard", authenticate, async (req, res) => {
   try {
     // Get the authenticated user's ID from the middleware
-    const userId = req.user._id;
+    const userId = req.user._id.toString(); // Ensure userId is a string
     console.log("Fetching campaigns for user:", userId);
+
+    // Log the authenticated user for debugging
+    console.log("Authenticated user:", req.user);
 
     // Query campaigns for the logged-in user only
     const campaigns = await Campaign.find({ userId });
-
     console.log("Campaigns found:", campaigns);
 
     // Return the user and their campaigns in the response

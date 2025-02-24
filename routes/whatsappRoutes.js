@@ -14,9 +14,9 @@ const router = express.Router();
 router.use(cors());
 
 // Ensure uploads directory exists
-const dir = './uploads';
-if (!fs.existsSync(dir)) {
-  fs.mkdirSync(dir);
+const UPLOAD_DIR = process.env.UPLOAD_DIR || './uploads';
+if (!fs.existsSync(UPLOAD_DIR)) {
+  fs.mkdirSync(UPLOAD_DIR);
 }
 
 // Database simulation (replace with actual database)
@@ -25,7 +25,7 @@ const usersDb = {}; // { userId: { client, qrCodeData, isAuthenticated } }
 // Multer configuration for media uploads
 const storage = multer.diskStorage({
   destination: function (req, file, cb) {
-    cb(null, 'uploads/');
+    cb(null, UPLOAD_DIR);
   },
   filename: function (req, file, cb) {
     cb(null, Date.now() + path.extname(file.originalname));
@@ -75,13 +75,15 @@ function initializeClient(userId) {
 // Route to get QR code for a specific user
 router.get('/qr', (req, res) => {
   const userId = "defaultUser"; // Use a default user ID since there's no authentication
-
   if (!usersDb[userId]) {
-    usersDb[userId] = { client: initializeClient(userId), qrCodeData: '', isAuthenticated: false };
+    usersDb[userId] = { 
+      userId: userId, // Explicitly include userId
+      client: initializeClient(userId), 
+      qrCodeData: '', 
+      isAuthenticated: false 
+    };
   }
-
   const user = usersDb[userId];
-
   if (user.qrCodeData) {
     res.json({ qrCode: user.qrCodeData });
   } else if (user.isAuthenticated) {
@@ -94,7 +96,7 @@ router.get('/qr', (req, res) => {
 // Route to send messages
 router.post('/send', upload.single('media'), async (req, res) => {
   const userId = "defaultUser"; // Use a default user ID since there's no authentication
-  const { users, message, campaignName } = req.body; // Add campaignName to the request body
+  const { users, message, campaignName } = req.body;
   const mediaFile = req.file;
 
   // Validate required fields
@@ -111,7 +113,7 @@ router.post('/send', upload.single('media'), async (req, res) => {
   // Validate phone numbers
   const invalidUsers = [];
   for (const user of userArray) {
-    const phoneNumber = parsePhoneNumberFromString(user, 'IN'); // Validate phone number (replace 'IN' with the country code)
+    const phoneNumber = parsePhoneNumberFromString(user, process.env.DEFAULT_COUNTRY_CODE || 'IN');
     if (!phoneNumber || !phoneNumber.isValid()) {
       invalidUsers.push(user);
     }
@@ -122,10 +124,8 @@ router.post('/send', upload.single('media'), async (req, res) => {
   }
 
   const client = usersDb[userId].client;
-
   try {
     const sentMessages = [];
-
     for (const user of userArray) {
       const phoneNumber = user.replace(/\D/g, ''); // Remove non-numeric characters
       const chatId = `${phoneNumber}@c.us`;
@@ -138,19 +138,25 @@ router.post('/send', upload.single('media'), async (req, res) => {
         await client.sendMessage(chatId, message);
       }
 
+      console.log(`Message sent to ${phoneNumber}:`, message);
       sentMessages.push(phoneNumber);
+
+      // Clean up uploaded file
+      if (mediaFile) {
+        fs.unlinkSync(mediaFile.path); // Delete the file after sending
+      }
     }
 
     // Save campaign data to MongoDB
     const newCampaign = new Campaign({
+      userId: userId, // Explicitly include the userId
       campaignName,
-      toolType: "whatsapp-bulk-sender", // Static name for the WhatsApp Bulk Sender tool
+      toolType: "whatsapp-bulk-sender",
       messageContent: message,
       recipients: sentMessages,
     });
 
     await newCampaign.save();
-
     res.json({ message: 'Messages sent successfully!', sentMessages });
   } catch (error) {
     console.error(error);

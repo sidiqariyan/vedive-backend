@@ -74,67 +74,70 @@ async function saveToCSV(businesses) {
   }
 }
 
+// Helper function to parse business details
+function parseBusinessDetails(parent, index) {
+  try {
+    const url = parent.find('a[href*="/maps/place/"]').attr('href');
+    const website = parent.find('a[data-value="Website"]').attr('href') || "N/A";
+    const storeName = parent.find('div.fontHeadlineSmall').text().trim() || "N/A";
+    const ratingText = parent.find('span[aria-label]').attr('aria-label') || "N/A";
+    const detailsText = parent.find('div.fontBodyMedium').first().text().split('·').map(t => t.trim());
+    const category = detailsText.length > 0 ? detailsText[0] : "N/A";
+    const address = detailsText.length > 1 ? detailsText[1] : "N/A";
+    const phone = detailsText.length > 2 ? detailsText[2] : "N/A";
+    const placeIdMatch = url?.match(/ChI[\w-]+/);
+    const placeId = placeIdMatch ? placeIdMatch[0] : "N/A";
+
+    console.log(`Parsed business #${index + 1}:`, { storeName, placeId, address, category, phone });
+
+    return {
+      index: index + 1,
+      storeName,
+      placeId,
+      address,
+      category,
+      phone,
+      googleUrl: url,
+      bizWebsite: website,
+      ratingText,
+    };
+  } catch (error) {
+    console.warn(`Error parsing business at index ${index}:`, error.message);
+    return null;
+  }
+}
+
 // Main scraping function
 async function searchGoogleMaps(query) {
+  if (!query || typeof query !== "string" || query.trim() === "") {
+    throw new Error("Invalid query. Please provide a valid search term.");
+  }
+
   let browser;
   try {
     browser = await puppeteer.launch({
       headless: process.env.HEADLESS !== "false", // Set to false for debugging
       args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-gpu"],
     });
+
     const page = await browser.newPage();
     await navigateWithRetries(page, `https://www.google.com/maps/search/${query.split(" ").join("+")}`);
     await delay(5000); // Wait for content to load
     await autoScroll(page);
+
     const html = await page.content();
     const $ = cheerio.load(html);
     const businesses = [];
 
     $('a[href*="/maps/place/"]').each((i, el) => {
-      try {
-        const parent = $(el).parent();
-        const url = $(el).attr('href');
-        const website = parent.find('a[data-value="Website"]').attr('href');
-        const storeName = parent.find('div.fontHeadlineSmall').text().trim();
-        const ratingText = parent.find('span[aria-label]').attr('aria-label') || null;
-        const detailsText = parent.find('div.fontBodyMedium').first().text().split('·').map(t => t.trim());
-        const category = detailsText.length > 0 ? detailsText[0] : null;
-        const address = detailsText.length > 1 ? detailsText[1] : null;
-        const phone = detailsText.length > 2 ? detailsText[2] : null;
-        const placeIdMatch = url?.match(/ChI[\w-]+/);
-        const placeId = placeIdMatch ? placeIdMatch[0] : null;
-
-        console.log(`Scraped business #${i + 1}:`, {
-          storeName,
-          placeId,
-          address,
-          category,
-          phone,
-          googleUrl: url,
-          bizWebsite: website,
-          ratingText,
-        });
-
-        businesses.push({
-          index: i + 1,
-          storeName,
-          placeId,
-          address,
-          category,
-          phone,
-          googleUrl: url,
-          bizWebsite: website,
-          ratingText,
-        });
-      } catch (error) {
-        console.warn(`Error parsing business at index ${i}:`, error.message);
-      }
+      const business = parseBusinessDetails($(el).parent(), i);
+      if (business) businesses.push(business);
     });
 
-    // Sort businesses by rating (handle invalid ratings)
+    // Sort businesses by rating
     businesses.sort((a, b) => {
-      const ratingA = parseFloat(a.ratingText) || 0;
-      const ratingB = parseFloat(b.ratingText) || 0;
+      const ratingA = parseFloat(a.ratingText?.replace(/[^0-9.]/g, "")) || 0;
+      const ratingB = parseFloat(b.ratingText?.replace(/[^0-9.]/g, "")) || 0;
       return ratingB - ratingA;
     });
 

@@ -95,37 +95,59 @@ async function saveToCSV(businesses) {
 // Number Scraper Route
 app.get("/api/numberScraper", authenticate, async (req, res) => {
   const { query, campaignName } = req.query;
+
+  // Validate required fields
   if (!query || !campaignName) {
     return res.status(400).json({ error: "Query and Campaign Name are required" });
   }
 
+  // Sanitize inputs
+  const sanitizeInput = (input) => input.replace(/[^\w\s]/gi, "");
+  const sanitizedQuery = sanitizeInput(query);
+  const sanitizedCampaignName = sanitizeInput(campaignName);
+
   try {
     console.log("Scraping process started...");
-    const businesses = await searchGoogleMaps(query);
+    const businesses = await searchGoogleMaps(sanitizedQuery);
+
     if (!businesses || businesses.length === 0) {
       return res.status(404).json({ message: "No businesses found" });
     }
 
+    // Extract and validate phone numbers
+    const isValidPhoneNumber = (phoneNumber) => {
+      const phoneRegex = /^[+]?[(]?[0-9]{1,4}[)]?[-\s./0-9]*$/;
+      return phoneRegex.test(phoneNumber);
+    };
+
     const phoneNumbers = businesses
       .map((business) => business.phone || business.phoneNumber)
-      .filter((phoneNumber) => phoneNumber);
+      .filter((phoneNumber) => phoneNumber && isValidPhoneNumber(phoneNumber));
 
+    if (!phoneNumbers || phoneNumbers.length === 0) {
+      return res.status(404).json({ message: "No valid phone numbers found in the scraped data." });
+    }
+
+    // Save campaign data to MongoDB
     const newCampaign = new Campaign({
-      userId: req.user._id, // Ensure user association
-      campaignName,
+      userId: req.user._id, // Associate the campaign with the authenticated user
+      campaignName: sanitizedCampaignName,
       toolType: "number-scraper",
-      query,
+      query: sanitizedQuery,
       scrapedNumbers: phoneNumbers,
     });
 
     await newCampaign.save();
 
+    // Save businesses data to CSV file
     const csvFileName = await saveToCSV(businesses);
     if (!csvFileName) {
       return res.status(500).json({ error: "Failed to save CSV file" });
     }
 
-    return res.json({ businesses, csvFileName });
+    // Return the response with CSV download URL
+    const csvDownloadUrl = `${process.env.BASE_URL}/api/download?filename=${csvFileName}`;
+    return res.json({ businesses, csvFileName, csvDownloadUrl });
   } catch (error) {
     console.error("Error in scraping:", error);
     return res.status(500).json({ error: "An error occurred while scraping." });
