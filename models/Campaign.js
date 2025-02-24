@@ -1,22 +1,35 @@
 const mongoose = require("mongoose");
 
-// Define the campaign schema
-const campaignSchema = new mongoose.Schema({
-  campaignName: { type: String, required: true },
-  toolType: { type: String, required: true, enum: ["gmail-sender", "number-scraper", "mail-sender","whatsapp-bulk-sender","email-scraper"] },
-  smtpHost: { type: String },
-  smtpPort: { type: Number },
-  smtpUsername: { type: String },
-  smtpPassword: { type: String },
-  fromEmail: { type: String },
-  emailSubject: { type: String },
-  recipients: { type: [String] },
-  query: { type: String },
-  scrapedNumbers: { type: [String] },
-  messageContent: { type: String },
-  createdAt: { type: Date, default: Date.now },
-});
+const campaignSchema = new mongoose.Schema(
+  {
+    userId: { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true }, // Link to the user
+    campaignName: { type: String, required: true },
+    toolType: { 
+      type: String, 
+      required: true, 
+      enum: ["gmail-sender", "number-scraper", "mail-sender", "whatsapp-bulk-sender", "email-scraper"] 
+    },
+    smtpHost: { type: String, default: "" },
+    smtpPort: { type: Number, default: 587 }, // Default SMTP port
+    smtpUsername: { type: String, default: "" },
+    smtpPassword: { type: String, select: false }, // Exclude password from queries
+    fromEmail: { type: String, default: "" },
+    emailSubject: { type: String, default: "" },
+    recipients: { 
+      type: [String], 
+      validate: {
+        validator: function (emails) {
+          return emails.every(email => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email));
+        },
+        message: "Invalid email address found in recipients",
+      },
+    },
+    query: { type: String, default: "" },
+    scrapedNumbers: { type: [String], default: [] },
+    messageContent: { type: String, default: "" },
+  },
+  { timestamps: true } // Automatically adds createdAt & updatedAt
+);
 
-// Ensure the model is not recompiled if already defined
 const Campaign = mongoose.models.Campaign || mongoose.model("Campaign", campaignSchema);
 module.exports = Campaign;

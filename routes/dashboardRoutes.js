@@ -1,26 +1,29 @@
-// ./routes/dashboardRoutes.js
 const express = require("express");
 const router = express.Router();
-const User = require("../models/User");
+const Campaign = require("../models/Campaign");
+const { authenticate } = require("../middleware/authMiddleware");
 
-// Protected Dashboard Route
-router.get("/", async (req, res) => {
+// Fetch user-specific dashboard data
+router.get("/dashboard", authenticate, async (req, res) => {
   try {
-    console.log("Fetching user data for dashboard:", req.user?._id); // Debugging log
+    // Get the authenticated user's ID from the middleware
+    const userId = req.user._id;
+    console.log("Fetching campaigns for user:", userId);
 
-    if (!req.user) {
-      return res.status(401).json({ error: "User not authenticated" });
-    }
+    // Query campaigns for the logged-in user only
+    const campaigns = await Campaign.find({ userId });
 
-    const user = await User.findById(req.user._id).select("name email username"); // Fetch only necessary fields
-    if (!user) {
-      return res.status(404).json({ error: "User not found" });
-    }
+    console.log("Campaigns found:", campaigns);
 
-    res.json({ message: "Welcome to the dashboard!", user });
+    // Return the user and their campaigns in the response
+    res.json({
+      message: "Dashboard data retrieved successfully",
+      user: req.user,
+      campaigns: campaigns || [],
+    });
   } catch (error) {
-    console.error("Error fetching user data:", error.message);
-    res.status(500).json({ error: "Internal Server Error" });
+    console.error("Error fetching dashboard data:", error.message);
+    res.status(500).json({ error: "Failed to fetch dashboard data" });
   }
 });
 

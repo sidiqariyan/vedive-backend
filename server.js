@@ -5,6 +5,7 @@ const cors = require("cors");
 const path = require("path");
 const fs = require("fs");
 const passport = require("passport");
+const helmet = require("helmet"); // Added security
 const connectDB = require("./db");
 const { authenticate } = require("./middleware/authMiddleware");
 
@@ -15,6 +16,7 @@ const server = http.createServer(app);
 connectDB();
 
 // Middleware
+app.use(helmet()); // Security middleware
 app.use(cors({
   origin: process.env.FRONTEND_URL || "http://localhost:5173",
   methods: ["GET", "POST", "PUT", "DELETE"],
@@ -48,10 +50,11 @@ app.use("/api/posts", require("./routes/postRoutes"));
 // Initialize Google OAuth routes
 require("./middleware/googleAuth")(app);
 
-// Import Scraper Function
+// Import Scraper Function and related utilities
 const { searchGoogleMaps } = require("./routes/NumberScraper");
 const createCsvWriter = require('csv-writer').createObjectCsvWriter;
 const { v4: uuidv4 } = require('uuid');
+const Campaign = require("./models/Campaign"); // Avoid multiple imports
 
 // Save businesses to a CSV file in the public directory
 async function saveToCSV(businesses) {
@@ -90,7 +93,7 @@ async function saveToCSV(businesses) {
 }
 
 // Number Scraper Route
-app.get("/api/numberScraper", async (req, res) => {
+app.get("/api/numberScraper", authenticate, async (req, res) => {
   const { query, campaignName } = req.query;
   if (!query || !campaignName) {
     return res.status(400).json({ error: "Query and Campaign Name are required" });
@@ -107,9 +110,8 @@ app.get("/api/numberScraper", async (req, res) => {
       .map((business) => business.phone || business.phoneNumber)
       .filter((phoneNumber) => phoneNumber);
 
-    // Import Campaign Model only when needed
-    const Campaign = require("./models/Campaign");
     const newCampaign = new Campaign({
+      userId: req.user._id, // Ensure user association
       campaignName,
       toolType: "number-scraper",
       query,
@@ -118,7 +120,6 @@ app.get("/api/numberScraper", async (req, res) => {
 
     await newCampaign.save();
 
-    // Save CSV file and return the file name
     const csvFileName = await saveToCSV(businesses);
     if (!csvFileName) {
       return res.status(500).json({ error: "Failed to save CSV file" });
@@ -150,10 +151,25 @@ app.get('/api/download', (req, res) => {
     }
   });
 });
+const campaingRoutes = require("./routes/campaignRoutes")
+app.use("/", campaingRoutes)
+// Protected Dashboard Route with user-specific campaigns
+app.get("/api/dashboard", authenticate, async (req, res) => {
+  try {
+    const userId = req.user._id;
+    console.log("Fetching dashboard for user:", userId);
 
-// Protected Dashboard Route
-app.get("/api/dashboard", authenticate, (req, res) => {
-  res.json({ message: "Welcome to the dashboard!", user: req.user });
+    const campaigns = await Campaign.find({ userId });
+
+    res.json({
+      message: "Dashboard data retrieved successfully",
+      user: req.user,
+      campaigns: campaigns || []
+    });
+  } catch (error) {
+    console.error("Error fetching dashboard data:", error);
+    res.status(500).json({ error: "Failed to fetch dashboard data" });
+  }
 });
 
 // Global Error Handling Middleware
@@ -174,8 +190,9 @@ app.get('/health', (req, res) => {
 });
 
 // Start Server
-server.listen(process.env.PORT || 3000, () => {
-  console.log(`Server running on port ${process.env.PORT || 3000}`);
+const PORT = process.env.PORT || 3000;
+server.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
 }).on("error", (err) => {
   console.error("Server failed to start:", err.message);
 });

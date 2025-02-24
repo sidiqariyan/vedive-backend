@@ -4,6 +4,7 @@ const nodemailer = require('nodemailer');
 const fs = require('fs');
 const mongoose = require('mongoose');
 const Campaign = require('../models/Campaign'); // Import the Campaign model
+const { authenticate } = require('../middleware/authMiddleware'); // Import authentication middleware
 const router = express.Router();
 
 // Multer setup for file uploads
@@ -12,6 +13,7 @@ const upload = multer({ dest: 'uploads/' });
 // API endpoint to send bulk emails
 router.post(
   '/send-bulk-mail',
+  authenticate, // Protect the route with authentication
   upload.fields([
     { name: 'recipientsFile' }, // File containing recipient email addresses
     { name: 'htmlTemplate' },   // HTML template for the email body
@@ -36,7 +38,6 @@ router.post(
       // Validate uploaded files
       const recipientsFile = req.files?.recipientsFile?.[0];
       const htmlTemplateFile = req.files?.htmlTemplate?.[0];
-
       if (!recipientsFile || !htmlTemplateFile) {
         return res.status(400).send('Recipients file and HTML template file are required.');
       }
@@ -59,6 +60,7 @@ router.post(
 
       // Save campaign data to MongoDB
       const newCampaign = new Campaign({
+        userId: req.user._id, // Add the authenticated user's ID
         campaignName,
         toolType: "mail-sender", // Static name for the Gmail sender tool
         smtpHost,
@@ -69,8 +71,9 @@ router.post(
         emailSubject,
         recipients,
       });
-
+      
       await newCampaign.save();
+      console.log("New campaign saved:", newCampaign);
 
       // Construct the "from" field with display name
       const fromField = `"${fromEmail}" <${smtpUsername}>`;
@@ -105,7 +108,7 @@ router.post(
       res.send('Bulk emails sent successfully!');
     } catch (error) {
       console.error('Error sending bulk emails:', error);
-      res.status(500).send(`Error: ${error.message}`);
+      res.status(500).send({ error: error.message }); // Ensure error is returned as an object
     }
   }
 );

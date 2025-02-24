@@ -3,11 +3,13 @@ const { scrapeEmails } = require("../services/scrapeService");
 const { generateCSV } = require("../utils/csvWriter");
 const pLimit = require("p-limit"); // Add rate limiting
 const mongoose = require("mongoose");
+const fs = require("fs");
 const Campaign = require("../models/Campaign"); // Import the Campaign model
+const { authenticate } = require("../middleware/authMiddleware"); // Import authentication middleware
 const router = express.Router();
 
 // API endpoint to scrape emails
-router.post("/", async (req, res) => {
+router.post("/", authenticate, async (req, res) => {
   const { query, pages, domains, campaignName } = req.body;
 
   // Validate required fields
@@ -15,9 +17,14 @@ router.post("/", async (req, res) => {
     return res.status(400).json({ error: "Query and Campaign Name are required" });
   }
 
+  // Extract userId from the authenticated user
+  const userId = req.user?._id;
+  if (!userId) {
+    return res.status(401).json({ error: "User must be authenticated to create a campaign." });
+  }
+
   const apiKey = "AIzaSyD_nVwEodt7Mg10vbXWEKXbMVLwBCVDfJI"; // Google API key provided by the user
   const cx = "a0280e6e13d584edb"; // Google Custom Search Engine ID
-
   if (!apiKey || !cx) {
     return res.status(400).json({ error: "API key and CX (Custom Search Engine ID) are required" });
   }
@@ -67,6 +74,7 @@ router.post("/", async (req, res) => {
 
     // Save campaign data to MongoDB
     const newCampaign = new Campaign({
+      userId, // Include the authenticated user's ID
       campaignName,
       toolType: "email-scraper", // Static name for the Email Scraper tool
       query,
@@ -87,10 +95,13 @@ router.post("/", async (req, res) => {
         console.error("Error in downloading file:", err);
         return res.status(500).json({ error: "Error downloading the file." });
       }
+
+      // Clean up the generated CSV file after sending it
+      fs.unlinkSync(csvPath);
     });
   } catch (error) {
     console.error("Error during scraping:", error);
-    res.status(500).json({ error: "Something went wrong. Please try again." });
+    res.status(500).json({ error: error.message }); // Return the error message as JSON
   }
 });
 

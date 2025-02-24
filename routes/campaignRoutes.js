@@ -1,22 +1,77 @@
-// ./routes/campaignRoutes.js
 const express = require("express");
 const router = express.Router();
 const Campaign = require("../models/Campaign");
+const { authenticate } = require("../middleware/authMiddleware");
 
-// Fetch all campaigns for the logged-in user
-router.get("/", async (req, res) => {
+// Create a new campaign
+router.post("/create-campaign", authenticate, async (req, res) => {
   try {
-    console.log("Fetching campaigns for user:", req.user?._id); // Debugging log
+    const {
+      campaignName,
+      toolType,
+      smtpHost,
+      smtpPort,
+      fromEmail,
+      emailSubject,
+      recipients,
+      query,
+      scrapedNumbers,
+      messageContent,
+    } = req.body;
 
-    if (!req.user) {
-      return res.status(401).json({ error: "User not authenticated" });
+    // Validate required fields
+    if (!campaignName || !toolType || !fromEmail) {
+      return res.status(400).json({ error: "Missing required fields: campaignName, toolType, or fromEmail" });
     }
 
-    const campaigns = await Campaign.find({ userId: req.user._id }); // Fetch campaigns for the logged-in user
-    res.json(campaigns);
+    // Ensure recipients is an array
+    let recipientList = [];
+    try {
+      recipientList = Array.isArray(recipients) ? recipients : JSON.parse(recipients || "[]");
+    } catch (error) {
+      return res.status(400).json({ error: "Invalid recipients format. Must be an array." });
+    }
+
+    // Validate email addresses in recipients
+    if (recipientList.some(email => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) {
+      return res.status(400).json({ error: "Invalid email address found in recipients list." });
+    }
+
+    // Create a new campaign associated with the logged-in user
+    const newCampaign = new Campaign({
+      userId: req.user._id,
+      campaignName,
+      toolType,
+      smtpHost: smtpHost || "", // Default to empty string if not provided
+      smtpPort: smtpPort ? parseInt(smtpPort) : 587, // Default SMTP port
+      fromEmail,
+      emailSubject: emailSubject || "",
+      recipients: recipientList,
+      query: query || "",
+      scrapedNumbers: Array.isArray(scrapedNumbers) ? scrapedNumbers : [],
+      messageContent: messageContent || "",
+    });
+
+    await newCampaign.save();
+
+    res.status(201).json({
+      message: "Campaign created successfully",
+      campaign: newCampaign,
+    });
+  } catch (error) {
+    console.error("Error creating campaign:", error);
+    res.status(500).json({ error: "Failed to create campaign. Please try again." });
+  }
+});
+
+// Fetch all campaigns for the authenticated user
+router.get("/get-campaigns", authenticate, async (req, res) => {
+  try {
+    const campaigns = await Campaign.find({ userId: req.user._id }).sort({ createdAt: -1 });
+    res.status(200).json(campaigns);
   } catch (error) {
     console.error("Error fetching campaigns:", error.message);
-    res.status(500).json({ error: "Internal Server Error" });
+    res.status(500).json({ error: "Failed to fetch campaigns" });
   }
 });
 
