@@ -32,14 +32,14 @@ router.post(
 
       // Validate required fields
       if (!smtpHost || !smtpPort || !smtpUsername || !smtpPassword || !fromEmail || !emailSubject || !campaignName) {
-        return res.status(400).send('Missing required SMTP, email, or campaign details.');
+        return res.status(400).json({ error: 'Missing required SMTP, email, or campaign details.' });
       }
 
       // Validate uploaded files
       const recipientsFile = req.files?.recipientsFile?.[0];
       const htmlTemplateFile = req.files?.htmlTemplate?.[0];
       if (!recipientsFile || !htmlTemplateFile) {
-        return res.status(400).send('Recipients file and HTML template file are required.');
+        return res.status(400).json({ error: 'Recipients file and HTML template file are required.' });
       }
 
       // Read recipients and email body from uploaded files
@@ -60,20 +60,22 @@ router.post(
 
       // Save campaign data to MongoDB
       const newCampaign = new Campaign({
-        userId: req.user._id, // Add the authenticated user's ID
+        userId: req.user._id, // Authenticated user's ID from middleware
         campaignName,
-        toolType: "mail-sender", // Static name for the Gmail sender tool
+        toolType: 'mail-sender', // Static name for the Gmail sender tool
         smtpHost,
         smtpPort: parseInt(smtpPort),
         smtpUsername,
-        smtpPassword,
+        smtpPassword, // Consider encrypting this in production
         fromEmail,
         emailSubject,
         recipients,
+        status: 'pending', // Add status to track progress
+        createdAt: new Date(), // Add timestamp
       });
-      
+
       await newCampaign.save();
-      console.log("New campaign saved:", newCampaign);
+      console.log('New campaign saved:', newCampaign);
 
       // Construct the "from" field with display name
       const fromField = `"${fromEmail}" <${smtpUsername}>`;
@@ -81,14 +83,14 @@ router.post(
       // Filter valid email addresses
       const validRecipients = recipients.filter((email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email));
       if (validRecipients.length === 0) {
-        return res.status(400).send('No valid email addresses found in recipients file.');
+        return res.status(400).json({ error: 'No valid email addresses found in recipients file.' });
       }
 
       // Send emails to valid recipients
       const sendPromises = validRecipients.map(async (recipient) => {
         try {
           await transporter.sendMail({
-            from: fromField, // Use the constructed "from" field
+            from: fromField,
             to: recipient,
             subject: emailSubject,
             html: emailBody,
@@ -101,16 +103,33 @@ router.post(
 
       await Promise.all(sendPromises);
 
+      // Update campaign status
+      newCampaign.status = 'completed';
+      await newCampaign.save();
+
       // Clean up uploaded files
       fs.unlinkSync(recipientsFile.path);
       fs.unlinkSync(htmlTemplateFile.path);
 
-      res.send('Bulk emails sent successfully!');
+      res.json({ message: 'Bulk emails sent successfully!', campaignId: newCampaign._id });
     } catch (error) {
       console.error('Error sending bulk emails:', error);
-      res.status(500).send({ error: error.message }); // Ensure error is returned as an object
+      res.status(500).json({ error: 'Failed to send bulk emails', details: error.message });
     }
   }
 );
+
+// API endpoint to get user-specific campaigns
+router.get('/campaigns', authenticate, async (req, res) => {
+  try {
+    // Fetch campaigns only for the authenticated user
+    const campaigns = await Campaign.find({ userId: req.user._id }).select('-smtpPassword'); // Exclude sensitive fields
+    console.log(`Fetched ${campaigns.length} campaigns for user ${req.user._id}`);
+    res.json(campaigns);
+  } catch (error) {
+    console.error('Error fetching campaigns:', error);
+    res.status(500).json({ error: 'Failed to fetch campaigns', details: error.message });
+  }
+});
 
 module.exports = router;

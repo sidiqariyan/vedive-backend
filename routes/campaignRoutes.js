@@ -11,6 +11,8 @@ router.post("/create-campaign", authenticate, async (req, res) => {
       toolType,
       smtpHost,
       smtpPort,
+      smtpUsername, // Added for consistency with previous endpoints
+      smtpPassword, // Added for consistency with previous endpoints
       fromEmail,
       emailSubject,
       recipients,
@@ -32,8 +34,11 @@ router.post("/create-campaign", authenticate, async (req, res) => {
       return res.status(400).json({ error: "Invalid recipients format. Must be an array." });
     }
 
-    // Validate email addresses in recipients
-    if (recipientList.some(email => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))) {
+    // Validate email addresses if toolType involves emailing
+    if (
+      (toolType === "mail-sender" || toolType === "gmail-sender") &&
+      recipientList.some((email) => !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email))
+    ) {
       return res.status(400).json({ error: "Invalid email address found in recipients list." });
     }
 
@@ -42,21 +47,34 @@ router.post("/create-campaign", authenticate, async (req, res) => {
       userId: req.user._id,
       campaignName,
       toolType,
-      smtpHost: smtpHost || "", // Default to empty string if not provided
+      smtpHost: smtpHost || "",
       smtpPort: smtpPort ? parseInt(smtpPort) : 587, // Default SMTP port
+      smtpUsername: smtpUsername || "",
+      smtpPassword: smtpPassword || "", // Store securely (consider encryption in production)
       fromEmail,
       emailSubject: emailSubject || "",
       recipients: recipientList,
       query: query || "",
       scrapedNumbers: Array.isArray(scrapedNumbers) ? scrapedNumbers : [],
       messageContent: messageContent || "",
+      status: "pending", // Default status
+      createdAt: new Date(), // Explicitly set creation date
     });
 
     await newCampaign.save();
 
     res.status(201).json({
       message: "Campaign created successfully",
-      campaign: newCampaign,
+      campaign: {
+        _id: newCampaign._id,
+        campaignName: newCampaign.campaignName,
+        toolType: newCampaign.toolType,
+        fromEmail: newCampaign.fromEmail,
+        emailSubject: newCampaign.emailSubject,
+        recipients: newCampaign.recipients,
+        status: newCampaign.status,
+        createdAt: newCampaign.createdAt,
+      }, // Return sanitized campaign data, excluding sensitive fields like smtpPassword
     });
   } catch (error) {
     console.error("Error creating campaign:", error);
@@ -65,9 +83,11 @@ router.post("/create-campaign", authenticate, async (req, res) => {
 });
 
 // Fetch all campaigns for the authenticated user
-router.get("/get-campaigns", authenticate, async (req, res) => {
+router.get("/campaigns", authenticate, async (req, res) => {
   try {
-    const campaigns = await Campaign.find({ userId: req.user._id }).sort({ createdAt: -1 });
+    const campaigns = await Campaign.find({ userId: req.user._id })
+      .select("-smtpPassword") // Exclude sensitive fields
+      .sort({ createdAt: -1 }); // Sort by most recent first
     res.status(200).json(campaigns);
   } catch (error) {
     console.error("Error fetching campaigns:", error.message);
