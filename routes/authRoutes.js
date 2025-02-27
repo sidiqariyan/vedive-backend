@@ -5,6 +5,7 @@ const User = require("../models/User");
 const { sendVerificationEmail, sendResetPasswordEmail } = require("../utils/sendEmail");
 const router = express.Router();
 const { authenticate } = require("../middleware/authMiddleware");
+require("dotenv").config(); // Ensure environment variables are loaded
 
 // Helper Function: Generate JWT Token
 const generateToken = (payload) => {
@@ -12,6 +13,8 @@ const generateToken = (payload) => {
 };
 
 // Register Route
+
+
 router.post("/register", async (req, res) => {
   try {
     const { name, username, email, password } = req.body;
@@ -27,7 +30,7 @@ router.post("/register", async (req, res) => {
       return res.status(400).json({ error: "User already exists" });
     }
 
-    // Hash the password
+    // Hash the password before saving
     const hashedPassword = await bcrypt.hash(password, 10);
 
     // Create a new user
@@ -38,22 +41,27 @@ router.post("/register", async (req, res) => {
       password: hashedPassword,
     });
 
-    // Generate a verification token
-    const verificationToken = generateToken({ _id: user._id }); // Include _id in the payload
+    // Save the user to the database
+    await user.save();
+    const verificationToken = generateToken({ _id: user._id });
     user.verificationToken = verificationToken;
+
+    // Save the user to the database
     await user.save();
 
-    // Send verification email
+    // Send verification email with the token
     const verificationUrl = `${process.env.CLIENT_URL}/verify-email?token=${verificationToken}`;
     await sendVerificationEmail(email, verificationUrl);
 
+
     // Respond with success message
-    res.status(201).json({ message: "User registered. Please verify your email." });
+    res.status(201).json({ message: "User registered successfully" });
   } catch (error) {
     console.error("Registration Error:", error);
     res.status(500).json({ error: error.message || "Registration failed" });
   }
 });
+
 
 // Verify Email Route
 router.get("/verify-email", async (req, res) => {
@@ -72,7 +80,7 @@ router.get("/verify-email", async (req, res) => {
     await user.save();
 
     // Generate JWT token
-    const authToken = generateToken({ _id: user._id }); // Include _id in the payload
+    const authToken = generateToken({ _id: user._id });
     res.status(200).json({ message: "Email verified successfully", token: authToken });
   } catch (error) {
     console.error("Email Verification Error:", error);
@@ -84,12 +92,20 @@ router.get("/verify-email", async (req, res) => {
 router.post("/login", async (req, res) => {
   try {
     const { emailOrUsername, password } = req.body;
+    console.log("Login attempt with:", { emailOrUsername });
 
     // Find user by email or username
     const user = await User.findOne({
       $or: [{ email: emailOrUsername }, { username: emailOrUsername }],
     });
+
     if (!user) {
+      return res.status(400).json({ error: "Invalid credentials" });
+    }
+
+    // Check if password matches
+    const isMatch = await bcrypt.compare(password, user.password);
+    if (!isMatch) {
       return res.status(400).json({ error: "Invalid credentials" });
     }
 
@@ -98,20 +114,22 @@ router.post("/login", async (req, res) => {
       return res.status(400).json({ error: "Please verify your email" });
     }
 
-    // Compare password
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
-      return res.status(400).json({ error: "Invalid credentials" });
-    }
-
     // Generate JWT token
-    const token = generateToken({ _id: user._id }); // Include _id in the payload
+    const token = jwt.sign({ _id: user._id }, process.env.JWT_SECRET, {
+      expiresIn: "1h",
+    });
+
+    // Respond with the token
     res.status(200).json({ message: "Login successful", token });
   } catch (error) {
     console.error("Login Error:", error);
     res.status(500).json({ error: "Login failed" });
   }
 });
+
+
+
+
 
 // Forgot Password Route
 router.post("/forgot-password", async (req, res) => {
@@ -125,14 +143,20 @@ router.post("/forgot-password", async (req, res) => {
     }
 
     // Generate reset password token
-    const resetToken = generateToken({ _id: user._id }); // Include _id in the payload
+    const resetToken = generateToken({ _id: user._id });
     user.resetPasswordToken = resetToken;
     user.resetPasswordExpires = Date.now() + 3600000; // 1 hour
     await user.save();
 
     // Send reset password email
     const resetUrl = `${process.env.CLIENT_URL}/reset-password?token=${resetToken}`;
-    await sendResetPasswordEmail(email, resetUrl);
+    try {
+      await sendResetPasswordEmail(email, resetUrl);
+      console.log(`Password reset email sent to ${email}`);
+    } catch (error) {
+      console.error("Error sending password reset email:", error);
+      return res.status(500).json({ error: "Failed to send reset link" });
+    }
 
     res.status(200).json({ message: "Password reset link sent to your email" });
   } catch (error) {
@@ -140,6 +164,9 @@ router.post("/forgot-password", async (req, res) => {
     res.status(500).json({ error: "Failed to send reset link" });
   }
 });
+
+module.exports = router;
+
 
 // Reset Password Route
 router.post("/reset-password", async (req, res) => {
@@ -174,7 +201,7 @@ router.post("/reset-password", async (req, res) => {
 // Fetch User Data Route
 router.get("/user", authenticate, async (req, res) => {
   try {
-    const user = await User.findById(req.user._id).select("-password"); // Exclude password
+    const user = await User.findById(req.user._id).select("name username email");
     if (!user) {
       return res.status(404).json({ error: "User not found" });
     }
@@ -182,6 +209,42 @@ router.get("/user", authenticate, async (req, res) => {
   } catch (error) {
     console.error("Error fetching user data:", error);
     res.status(500).json({ error: "Internal Server Error" });
+  }
+});
+
+// Update Password Route
+router.put("/update-password", authenticate, async (req, res) => {
+  try {
+    const { currentPassword, newPassword } = req.body;
+
+    // Validate required fields
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ error: "Both currentPassword and newPassword are required" });
+    }
+
+    // Find the user by ID
+    const user = await User.findById(req.user._id);
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // Compare the provided current password with the stored password
+    const isMatch = await bcrypt.compare(currentPassword, user.password);
+    if (!isMatch) {
+      return res.status(400).json({ error: "Current password is incorrect" });
+    }
+
+    // Hash the new password
+    const hashedPassword = await bcrypt.hash(newPassword, 10);
+
+    // Update the user's password
+    user.password = hashedPassword;
+    await user.save();
+
+    res.json({ message: "Password updated successfully" });
+  } catch (error) {
+    console.error("Error updating password:", error);
+    res.status(500).json({ error: "Failed to update password" });
   }
 });
 
