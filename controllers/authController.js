@@ -9,7 +9,10 @@ const generateToken = (payload) => {
   return jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: "1h" });
 };
 
-// Register a new user
+/**
+ * Register a new user
+ * @route POST /api/auth/register
+ */
 exports.register = async (req, res) => {
   try {
     const { name, username, email, password } = req.body;
@@ -20,9 +23,9 @@ exports.register = async (req, res) => {
     }
 
     // Check if user already exists
-    const existingUser = await User.findOne({ email });
+    const existingUser = await User.findOne({ $or: [{ email }, { username }] });
     if (existingUser) {
-      return res.status(400).json({ error: "User already exists" });
+      return res.status(400).json({ error: "User with this email or username already exists" });
     }
 
     // Hash the password before saving
@@ -38,6 +41,8 @@ exports.register = async (req, res) => {
 
     // Save the user to the database
     await user.save();
+
+    // Generate verification token
     const verificationToken = generateToken({ _id: user._id });
     user.verificationToken = verificationToken;
     await user.save();
@@ -47,14 +52,17 @@ exports.register = async (req, res) => {
     await sendVerificationEmail(email, verificationUrl);
 
     // Respond with success message
-    res.status(201).json({ message: "User registered successfully" });
+    res.status(201).json({ message: "User registered successfully. Please verify your email." });
   } catch (error) {
     console.error("Registration Error:", error);
     res.status(500).json({ error: error.message || "Registration failed" });
   }
 };
 
-// Verify Email
+/**
+ * Verify Email
+ * @route GET /api/auth/verify-email
+ */
 exports.verifyEmail = async (req, res) => {
   try {
     const { token } = req.query;
@@ -79,7 +87,10 @@ exports.verifyEmail = async (req, res) => {
   }
 };
 
-// Login User
+/**
+ * Login User
+ * @route POST /api/auth/login
+ */
 exports.login = async (req, res) => {
   try {
     const { emailOrUsername, password } = req.body;
@@ -106,14 +117,26 @@ exports.login = async (req, res) => {
 
     // Generate JWT token
     const token = generateToken({ _id: user._id });
-    res.status(200).json({ message: "Login successful", token });
+    res.status(200).json({
+      message: "Login successful",
+      token,
+      user: {
+        _id: user._id,
+        name: user.name,
+        username: user.username,
+        email: user.email,
+      },
+    });
   } catch (error) {
     console.error("Login Error:", error);
     res.status(500).json({ error: "Login failed" });
   }
 };
 
-// Forgot Password
+/**
+ * Forgot Password
+ * @route POST /api/auth/forgot-password
+ */
 exports.forgotPassword = async (req, res) => {
   try {
     const { email } = req.body;
@@ -141,7 +164,10 @@ exports.forgotPassword = async (req, res) => {
   }
 };
 
-// Reset Password
+/**
+ * Reset Password
+ * @route POST /api/auth/reset-password
+ */
 exports.resetPassword = async (req, res) => {
   try {
     const { token, newPassword } = req.body;
@@ -171,7 +197,10 @@ exports.resetPassword = async (req, res) => {
   }
 };
 
-// Fetch User Data
+/**
+ * Fetch User Data
+ * @route GET /api/auth/me
+ */
 exports.getUserData = async (req, res) => {
   try {
     const user = await User.findById(req.user._id).select("name username email");
@@ -185,7 +214,10 @@ exports.getUserData = async (req, res) => {
   }
 };
 
-// Update Password
+/**
+ * Update Password
+ * @route POST /api/auth/update-password
+ */
 exports.updatePassword = async (req, res) => {
   try {
     const { currentPassword, newPassword } = req.body;

@@ -1,0 +1,127 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Guest Posting Service - High Traffic & Authority Sites</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f5f5f5;
+            text-align: center;
+        }
+        .container {
+            max-width: 900px;
+            margin: 50px auto;
+            background: white;
+            padding: 20px;
+            border-radius: 10px;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.1);
+        }
+        h1 {
+            color: #ff6600;
+        }
+        p {
+            font-size: 18px;
+            color: #333;
+        }
+        .table-container {
+            overflow-x: auto;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 20px;
+        }
+        th, td {
+            padding: 12px;
+            border: 1px solid #ddd;
+            text-align: center;
+        }
+        th {
+            background-color: #ff6600;
+            color: white;
+        }
+        .contact {
+            margin-top: 30px;
+            padding: 15px;
+            background: #ff6600;
+            color: white;
+            font-size: 20px;
+            display: inline-block;
+            border-radius: 5px;
+            text-decoration: none;
+        }
+        .contact:hover {
+            background: #e65c00;
+        }
+        .sites-list {
+            margin-top: 20px;
+            padding: 15px;
+            background: #fff;
+            border-radius: 10px;
+            box-shadow: 0 0 10px rgba(0, 0, 0, 0.1);
+        }
+        .sites-list a {
+            display: block;
+            font-size: 18px;
+            color: #ff6600;
+            text-decoration: none;
+            margin: 5px 0;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🚀 High-Traffic Guest Posting Service</h1>
+        <p>Get your content published on high-authority websites with excellent traffic! Boost your SEO and brand visibility with our premium guest posting service.</p>
+        
+        <div class="table-container">
+            <table>
+                <tr>
+                    <th>Website</th>
+                    <th>Category</th>
+                    <th>Price</th>
+                    <th>Domain Authority</th>
+                    <th>Rating</th>
+                    <th>Traffic</th>
+                </tr>
+                <tr>
+                    <td><a href="https://infobdtech.com" target="_blank">infobdtech.com</a></td>
+                    <td>General</td>
+                    <td>$60</td>
+                    <td>30</td>
+                    <td>47</td>
+                    <td>8,452</td>
+                </tr>
+                <tr>
+                    <td><a href="https://teerweb.com" target="_blank">teerweb.com</a></td>
+                    <td>General</td>
+                    <td>$35</td>
+                    <td>55</td>
+                    <td>51</td>
+                    <td>5,110</td>
+                </tr>
+                <tr>
+                    <td><a href="https://bdtipsnet.com" target="_blank">bdtipsnet.com</a></td>
+                    <td>General</td>
+                    <td>$70</td>
+                    <td>61</td>
+                    <td>47</td>
+                    <td>4,104</td>
+                </tr>
+            </table>
+        </div>
+        
+        <div class="sites-list">
+            <h2>📜 Explore More High-Traffic Sites</h2>
+            <a href="https://docs.google.com/spreadsheets/d/1Dlf_Hj5s71vJyQPVZg7F0pH_2ua8O_XU9x5ti26RuxI/edit?gid=0#gid=0" target="_blank">📌 View Full Site List Here</a>
+        </div>
+        
+        <p><strong>Take your website’s SEO and traffic to the next level with our trusted guest posting service.</strong></p>
+        <a href="mailto:info@mymoviestv.com" class="contact">📩 Contact Us Now</a>
+    </div>
+</body>
+</html>

@@ -1,7 +1,5 @@
 const axios = require("axios");
 const crypto = require("crypto");
-
-// Load environment variables
 require("dotenv").config();
 
 /**
@@ -21,12 +19,6 @@ const generateSignature = (data, secretKey) => {
 /**
  * Process Payment with Cashfree
  * @param {Object} paymentDetails - Details of the payment
- * @param {Number} paymentDetails.amount - Amount to charge
- * @param {String} paymentDetails.currency - Currency (e.g., "INR")
- * @param {String} paymentDetails.orderId - Unique order ID
- * @param {String} paymentDetails.customerName - Customer's name
- * @param {String} paymentDetails.customerEmail - Customer's email
- * @param {String} paymentDetails.customerPhone - Customer's phone number
  * @returns {Promise<Object>} - Payment response from Cashfree
  */
 const processPayment = async (paymentDetails) => {
@@ -40,36 +32,68 @@ const processPayment = async (paymentDetails) => {
   } = paymentDetails;
 
   try {
+    // Ensure Cashfree credentials are set
+    const clientId = process.env.CASHFREE_APP_ID;
+    const clientSecret = process.env.CASHFREE_SECRET_KEY;
+    const environment = process.env.CASHFREE_ENV || "TEST"; // "PROD" for production
+
+    if (!clientId || !clientSecret) {
+      console.error("Cashfree credentials are missing in .env file");
+      throw new Error("Missing Cashfree credentials");
+    }
+
+    // Base URL for Cashfree API (Sandbox vs Production)
+    const CASHFREE_BASE_URL = environment === "PROD"
+      ? "https://api.cashfree.com"
+      : "https://sandbox.cashfree.com";
+
     // Prepare request payload
     const requestData = {
-      appId: process.env.CASHFREE_APP_ID,
-      orderId,
-      orderAmount: amount,
-      orderCurrency: currency,
-      customerName,
-      customerEmail,
-      customerPhone,
-      returnUrl: `${process.env.CLIENT_URL}/payment-success`, // Redirect URL after payment
-      notifyUrl: `${process.env.CLIENT_URL}/payment-notification`, // Webhook URL for notifications
+      order_id: orderId,
+      order_amount: amount,
+      order_currency: currency,
+      customer_details: {
+        customer_name: customerName,
+        customer_email: customerEmail,
+        customer_phone: customerPhone,
+      },
+      order_meta: {
+        return_url: `${process.env.CLIENT_URL}/payment-success?order_id=${orderId}`,
+        notify_url: `${process.env.CLIENT_URL}/payment-notification`,
+      },
     };
 
     // Generate signature
-    const signature = generateSignature(requestData, process.env.CASHFREE_SECRET_KEY);
+    const signature = generateSignature(requestData, clientSecret);
     requestData.signature = signature;
 
     // Send request to Cashfree
-    const response = await axios.post("https://test.cashfree.com/api/v2/cftoken/order", requestData, {
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-version": "2022-09-01", // Use the latest API version
-      },
-    });
+    const response = await axios.post(
+      "https://test.cashfree.com/api/v2/cftoken/order", // Use "api.cashfree.com" for live mode
+      requestData,
+      {
+        headers: {
+          "Content-Type": "application/json",
+          "x-api-version": "2022-09-01",
+          "x-client-id": clientId,  // Ensure correct key name
+          "x-client-secret": clientSecret, // Ensure correct key name
+        },
+      }
+    );
+    
+    
+
+    // Check if the response indicates success
+    if (response.data.status !== "ACTIVE") {
+      console.error("Cashfree Payment Response:", response.data);
+      throw new Error(response.data.message || "Payment processing failed");
+    }
 
     // Return the payment response
     return response.data;
   } catch (error) {
     console.error("Cashfree Payment Error:", error.response?.data || error.message);
-    throw new Error("Payment processing failed");
+    throw new Error(error.response?.data?.message || "Payment processing failed");
   }
 };
 
