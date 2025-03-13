@@ -1,9 +1,6 @@
 const puppeteer = require('puppeteer-extra');
 const cheerio = require('cheerio');
 const stealthPlugin = require('puppeteer-extra-plugin-stealth');
-const { createObjectCsvWriter } = require('csv-writer'); // Directly use csv-writer
-const { v4: uuidv4 } = require('uuid'); // For unique filenames
-const path = require('path');
 
 puppeteer.use(stealthPlugin());
 
@@ -39,38 +36,6 @@ async function navigateWithRetries(page, url, retries = 3) {
       console.warn(`Navigation attempt ${i + 1} failed. Retrying...`);
       if (i === retries - 1) throw error;
     }
-  }
-}
-
-// Save businesses data to a CSV file
-async function saveToCSV(businesses) {
-  if (!Array.isArray(businesses) || businesses.length === 0) {
-    console.error('No businesses data to save.');
-    return;
-  }
-
-  const csvFileName = path.join(__dirname, `businesses_${uuidv4()}.csv`); // Absolute path
-  const csvWriter = createObjectCsvWriter({
-    path: csvFileName,
-    header: [
-      { id: 'index', title: 'Index' },
-      { id: 'storeName', title: 'Store Name' },
-      { id: 'placeId', title: 'Place ID' },
-      { id: 'address', title: 'Address' },
-      { id: 'category', title: 'Category' },
-      { id: 'phone', title: 'Phone' },
-      { id: 'googleUrl', title: 'Google URL' },
-      { id: 'bizWebsite', title: 'Business Website' },
-      { id: 'ratingText', title: 'Rating' }
-    ]
-  });
-
-  try {
-    console.log(`Attempting to write ${businesses.length} records to CSV...`);
-    await csvWriter.writeRecords(businesses);
-    console.log(`The CSV file "${csvFileName}" was written successfully.`);
-  } catch (error) {
-    console.error('Error writing CSV file:', error.message);
   }
 }
 
@@ -121,35 +86,54 @@ async function searchGoogleMaps(query) {
     });
 
     const page = await browser.newPage();
+    
+    // Set a user agent to avoid detection
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
+    
+    console.log(`Navigating to Google Maps with query: ${query}`);
     await navigateWithRetries(page, `https://www.google.com/maps/search/${query.split(" ").join("+")}`);
+    
+    console.log("Waiting for initial page load...");
     await delay(5000); // Wait for content to load
+    
+    console.log("Scrolling through results...");
     await autoScroll(page);
 
+    console.log("Extracting page content...");
     const html = await page.content();
     const $ = cheerio.load(html);
     const businesses = [];
 
+    console.log("Parsing business data...");
     $('a[href*="/maps/place/"]').each((i, el) => {
       const business = parseBusinessDetails($(el).parent(), i);
       if (business) businesses.push(business);
     });
 
+    // Remove duplicates based on placeId
+    const uniqueBusinesses = Array.from(
+      new Map(businesses.map(item => [item.placeId, item])).values()
+    );
+
+    console.log(`Found ${uniqueBusinesses.length} unique businesses`);
+
     // Sort businesses by rating
-    businesses.sort((a, b) => {
+    uniqueBusinesses.sort((a, b) => {
       const ratingA = parseFloat(a.ratingText?.replace(/[^0-9.]/g, "")) || 0;
       const ratingB = parseFloat(b.ratingText?.replace(/[^0-9.]/g, "")) || 0;
       return ratingB - ratingA;
     });
 
-    // Save the businesses data to CSV file
-    await saveToCSV(businesses);
-    console.log(`Scraped ${businesses.length} businesses successfully.`);
-    return businesses;
+    console.log(`Scraped ${uniqueBusinesses.length} businesses successfully.`);
+    return uniqueBusinesses;
   } catch (error) {
     console.error('Error while scraping Google Maps:', error.message);
     return [];
   } finally {
-    if (browser) await browser.close();
+    if (browser) {
+      console.log("Closing browser...");
+      await browser.close();
+    }
   }
 }
 

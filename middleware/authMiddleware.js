@@ -65,26 +65,26 @@ const authenticate = async (req, res, next) => {
  * @param {Object} res - Express response object
  * @param {Function} next - Next middleware function
  */
-const checkSubscription = async (req, res, next) => {
-  const { user } = req;
+// const checkSubscription = async (req, res, next) => {
+//   const { user } = req;
 
-  // Check if the user has an active subscription
-  if (user.subscriptionStatus !== "active") {
-    return res.status(403).json({ error: "Subscription required to access this resource" });
-  }
+//   // Check if the user has an active subscription
+//   if (user.subscriptionStatus !== "active") {
+//     return res.status(403).json({ error: "Subscription required to access this resource" });
+//   }
 
-  // Check if the subscription has expired
-  const currentDate = new Date();
-  if (user.subscriptionEnd && user.subscriptionEnd < currentDate) {
-    // Update subscription status asynchronously to avoid blocking the request
-    User.findByIdAndUpdate(user._id, { subscriptionStatus: "inactive" }, { new: true })
-      .catch((err) => console.error("Error updating subscription status:", err));
+//   // Check if the subscription has expired
+//   const currentDate = new Date();
+//   if (user.subscriptionEnd && user.subscriptionEnd < currentDate) {
+//     // Update subscription status asynchronously to avoid blocking the request
+//     User.findByIdAndUpdate(user._id, { subscriptionStatus: "inactive" }, { new: true })
+//       .catch((err) => console.error("Error updating subscription status:", err));
 
-    return res.status(403).json({ error: "Subscription expired" });
-  }
+//     return res.status(403).json({ error: "Subscription expired" });
+//   }
 
-  next();
-};
+//   next();
+// };
 
 // Export both middlewares
-module.exports = { authenticate, checkSubscription };
+module.exports = { authenticate };

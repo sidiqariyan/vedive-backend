@@ -111,7 +111,7 @@ router.post(
       fs.unlinkSync(recipientsFile.path);
       fs.unlinkSync(htmlTemplateFile.path);
 
-      res.json({ message: 'Bulk emails sent successfully!', campaignId: newCampaign._id });
+      res.json({ message: 'Bulk emails sent successfully!', campaignId: newCampaign._id, success: true });
     } catch (error) {
       console.error('Error sending bulk emails:', error);
       res.status(500).json({ error: 'Failed to send bulk emails', details: error.message });
@@ -123,7 +123,9 @@ router.post(
 router.get('/campaigns', authenticate, async (req, res) => {
   try {
     // Fetch campaigns only for the authenticated user
-    const campaigns = await Campaign.find({ userId: req.user._id }).select('-smtpPassword'); // Exclude sensitive fields
+    const campaigns = await Campaign.find({ userId: req.user._id })
+      .select('-smtpPassword') // Exclude sensitive fields
+      .sort({ createdAt: -1 });
     console.log(`Fetched ${campaigns.length} campaigns for user ${req.user._id}`);
     res.json(campaigns);
   } catch (error) {

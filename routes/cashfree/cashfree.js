@@ -2,9 +2,9 @@ const express = require("express");
 const router = express.Router();
 const axios = require("axios");
 const { app_id, secret_key } = require("../../secret/secret");
+const { authenticate } = require("../../middleware/authMiddleware"); // Import the middleware
 
-// Create a new payment order
-router.post("/payment", async (req, res) => {
+router.post("/payment", authenticate, async (req, res) => {
   const { price, plan } = req.body;
 
   if (!price || !plan) {

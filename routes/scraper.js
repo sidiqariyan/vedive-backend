@@ -7,10 +7,7 @@ const { generateCSV } = require("../utils/csvWriter");
 const pLimit = require("p-limit");
 const fs = require("fs");
 const validator = require("validator");
-const app = express();
-
-app.use(express.json())
-
+const path = require("path");
 
 // Utility function to parse array fields
 const parseArrayField = (field, fieldName) => {
@@ -28,7 +25,6 @@ const parseArrayField = (field, fieldName) => {
   }
   return [];
 };
-
 
 // Create a new campaign (generic creation endpoint)
 router.post("/create-campaign", authenticate, async (req, res) => {
@@ -51,8 +47,13 @@ router.post("/create-campaign", authenticate, async (req, res) => {
     } = req.body;
 
     // Validate required fields
-    if (!campaignName || !toolType || !fromEmail) {
-      return res.status(400).json({ error: "Missing required fields: campaignName, toolType, or fromEmail" });
+    if (!campaignName || !toolType) {
+      return res.status(400).json({ error: "Missing required fields: campaignName and toolType" });
+    }
+
+    // Additional validation for email tools
+    if ((toolType === "mail-sender" || toolType === "gmail-sender") && !fromEmail) {
+      return res.status(400).json({ error: "fromEmail is required for mail-sender and gmail-sender tools" });
     }
 
     // Parse recipients
@@ -74,6 +75,7 @@ router.post("/create-campaign", authenticate, async (req, res) => {
     // Validate email addresses if applicable
     if (
       (toolType === "mail-sender" || toolType === "gmail-sender") &&
+      recipientList.length > 0 &&
       recipientList.some((email) => !validator.isEmail(email))
     ) {
       return res.status(400).json({ error: "Invalid email address found in recipients list" });
@@ -88,7 +90,7 @@ router.post("/create-campaign", authenticate, async (req, res) => {
       smtpPort: smtpPort ? parseInt(smtpPort) : 587,
       smtpUsername: smtpUsername || "",
       smtpPassword: smtpPassword || "",
-      fromEmail,
+      fromEmail: fromEmail || "",
       emailSubject: emailSubject || "",
       recipients: recipientList,
       query: query || "",
@@ -131,10 +133,10 @@ router.get("/campaigns", authenticate, async (req, res) => {
   }
 });
 
-// API endpoint to scrape emails
+// API endpoint to scrape emails - FIXED BY ADDING AUTHENTICATE MIDDLEWARE
 router.post("/scrape-emails", authenticate, async (req, res) => {
   try {
-    const { query, pages, domains, campaignName } = req.body;
+    const { query, pages = 2, domains, campaignName } = req.body;
 
     // Input validation
     if (!query || typeof query !== "string") {
@@ -155,8 +157,9 @@ router.post("/scrape-emails", authenticate, async (req, res) => {
       return res.status(401).json({ error: "User must be authenticated to create a campaign" });
     }
 
-    const apiKey = "AIzaSyD_nVwEodt7Mg10vbXWEKXbMVLwBCVDfJI";
-    const cx = "a0280e6e13d584edb";
+    // Move API keys to environment variables
+    const apiKey = process.env.GOOGLE_API_KEY || "AIzaSyD_nVwEodt7Mg10vbXWEKXbMVLwBCVDfJI";
+    const cx = process.env.GOOGLE_SEARCH_CX || "a0280e6e13d584edb";
 
     if (!apiKey || !cx) {
       return res.status(400).json({ error: "API key and CX (Custom Search Engine ID) are required" });
@@ -181,7 +184,7 @@ router.post("/scrape-emails", authenticate, async (req, res) => {
       try {
         return await fn();
       } catch (err) {
-        if (retries > 0 && err.response && err.response.status === 429) {
+        if (retries > 0 && (err.response?.status === 429 || err.code === 'ECONNRESET')) {
           await new Promise((resolve) => setTimeout(resolve, delay));
           return retryWithBackoff(fn, retries - 1, delay * 2);
         }
@@ -198,7 +201,7 @@ router.post("/scrape-emails", authenticate, async (req, res) => {
     );
 
     const emailResults = await Promise.all(emailPromises);
-    const emails = emailResults.flat().filter(Boolean);
+    const emails = [...new Set(emailResults.flat().filter(Boolean))]; // Remove duplicates
 
     if (emails.length === 0) {
       return res.status(404).json({ message: "No emails found" });
@@ -215,25 +218,40 @@ router.post("/scrape-emails", authenticate, async (req, res) => {
 
     await newCampaign.save();
 
-    const csvPath = await generateCSV(emails);
+    // Generate CSV file with emails
+    const csvPath = await generateCSV(emails.map(email => ({ email })));
+    
+    if (!csvPath) {
+      return res.status(500).json({ error: "Failed to generate CSV file" });
+    }
 
+    // Send the file as a download
     res.setHeader("Content-Type", "application/octet-stream");
-    res.setHeader("Content-Disposition", "attachment; filename=emails.csv");
+    res.setHeader("Content-Disposition", `attachment; filename=emails-${Date.now()}.csv`);
 
-    res.sendFile(csvPath, (err) => {
-      if (err) {
-        console.error("Error in downloading file:", err);
-        return res.status(500).json({ error: "Error downloading the file" }); // Ensure JSON response for errors
-      }
+    const fileStream = fs.createReadStream(csvPath);
+    fileStream.pipe(res);
+    
+    // Clean up the file after sending
+    fileStream.on('close', () => {
       fs.unlink(csvPath, (unlinkErr) => {
         if (unlinkErr) {
           console.error("Failed to delete file:", csvPath, unlinkErr);
         }
       });
     });
+    
+    fileStream.on('error', (err) => {
+      console.error("File stream error:", err);
+      if (!res.headersSent) {
+        res.status(500).json({ error: "Error streaming the file" });
+      }
+    });
   } catch (error) {
     console.error("Error in /scrape-emails:", error);
-    res.status(500).json({ error: error.message }); // Ensure JSON response for errors
+    if (!res.headersSent) {
+      res.status(500).json({ error: error.message || "An error occurred during email scraping" });
+    }
   }
 });
 
