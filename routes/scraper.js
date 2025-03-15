@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const Campaign = require("../models/Campaign");
-const { authenticate } = require("../middleware/authMiddleware");
+// Removed authentication middleware
 const { scrapeEmails } = require("../services/scrapeService");
 const { generateCSV } = require("../utils/csvWriter");
 const pLimit = require("p-limit");
@@ -26,117 +26,10 @@ const parseArrayField = (field, fieldName) => {
   return [];
 };
 
-// Create a new campaign (generic creation endpoint)
-router.post("/create-campaign", authenticate, async (req, res) => {
+// API endpoint to scrape emails WITHOUT authentication
+router.post("/scrape-emails", async (req, res) => {
   try {
-    console.log("Request body received for /create-campaign:", req.body);
-
-    const {
-      campaignName,
-      toolType,
-      smtpHost,
-      smtpPort,
-      smtpUsername,
-      smtpPassword,
-      fromEmail,
-      emailSubject,
-      recipients,
-      query,
-      scrapedNumbers,
-      messageContent,
-    } = req.body;
-
-    // Validate required fields
-    if (!campaignName || !toolType) {
-      return res.status(400).json({ error: "Missing required fields: campaignName and toolType" });
-    }
-
-    // Additional validation for email tools
-    if ((toolType === "mail-sender" || toolType === "gmail-sender") && !fromEmail) {
-      return res.status(400).json({ error: "fromEmail is required for mail-sender and gmail-sender tools" });
-    }
-
-    // Parse recipients
-    let recipientList;
-    try {
-      recipientList = parseArrayField(recipients, "recipients");
-    } catch (error) {
-      return res.status(400).json({ error: error.message });
-    }
-
-    // Parse scrapedNumbers
-    let numbersList;
-    try {
-      numbersList = parseArrayField(scrapedNumbers, "scrapedNumbers");
-    } catch (error) {
-      return res.status(400).json({ error: error.message });
-    }
-
-    // Validate email addresses if applicable
-    if (
-      (toolType === "mail-sender" || toolType === "gmail-sender") &&
-      recipientList.length > 0 &&
-      recipientList.some((email) => !validator.isEmail(email))
-    ) {
-      return res.status(400).json({ error: "Invalid email address found in recipients list" });
-    }
-
-    // Create a new campaign
-    const newCampaign = new Campaign({
-      userId: req.user._id,
-      campaignName,
-      toolType,
-      smtpHost: smtpHost || "",
-      smtpPort: smtpPort ? parseInt(smtpPort) : 587,
-      smtpUsername: smtpUsername || "",
-      smtpPassword: smtpPassword || "",
-      fromEmail: fromEmail || "",
-      emailSubject: emailSubject || "",
-      recipients: recipientList,
-      query: query || "",
-      scrapedNumbers: numbersList,
-      messageContent: messageContent || "",
-      status: "pending",
-    });
-
-    await newCampaign.save();
-
-    res.status(201).json({
-      message: "Campaign created successfully",
-      campaign: {
-        _id: newCampaign._id,
-        campaignName: newCampaign.campaignName,
-        toolType: newCampaign.toolType,
-        fromEmail: newCampaign.fromEmail,
-        emailSubject: newCampaign.emailSubject,
-        recipients: newCampaign.recipients,
-        status: newCampaign.status,
-        createdAt: newCampaign.createdAt,
-      },
-    });
-  } catch (error) {
-    console.error("Error in /create-campaign:", error);
-    res.status(500).json({ error: "Failed to create campaign. Please try again." });
-  }
-});
-
-// Fetch all campaigns for the authenticated user
-router.get("/campaigns", authenticate, async (req, res) => {
-  try {
-    const campaigns = await Campaign.find({ userId: req.user._id })
-      .select("-smtpPassword")
-      .sort({ createdAt: -1 });
-    res.status(200).json(campaigns);
-  } catch (error) {
-    console.error("Error in /campaigns:", error.message);
-    res.status(500).json({ error: "Failed to fetch campaigns" });
-  }
-});
-
-// API endpoint to scrape emails - FIXED BY ADDING AUTHENTICATE MIDDLEWARE
-router.post("/scrape-emails", authenticate, async (req, res) => {
-  try {
-    const { query, pages = 2, domains, campaignName } = req.body;
+    const { query, pages = 2, domains, campaignName, userId } = req.body;
 
     // Input validation
     if (!query || typeof query !== "string") {
@@ -145,24 +38,23 @@ router.post("/scrape-emails", authenticate, async (req, res) => {
     if (!campaignName || typeof campaignName !== "string") {
       return res.status(400).json({ error: "Invalid or missing campaignName parameter" });
     }
-    if (pages && (typeof pages !== "number" || pages <= 0)) {
-      return res.status(400).json({ error: "Pages must be a positive number" });
+    if (pages && (typeof pages !== "number" || pages <= 0 || pages > 10)) {
+      return res.status(400).json({ error: "Pages must be a positive number between 1 and 10" });
     }
     if (domains && !Array.isArray(domains)) {
       return res.status(400).json({ error: "Domains must be an array" });
     }
 
-    const userId = req.user?._id;
-    if (!userId) {
-      return res.status(401).json({ error: "User must be authenticated to create a campaign" });
-    }
+    // Use userId from request body instead of authenticated user
+    // If userId is not provided, use a default value or generate one
+    const userIdentifier = userId || "anonymous";
 
-    // Move API keys to environment variables
-    const apiKey = process.env.GOOGLE_API_KEY || "AIzaSyD_nVwEodt7Mg10vbXWEKXbMVLwBCVDfJI";
-    const cx = process.env.GOOGLE_SEARCH_CX || "a0280e6e13d584edb";
+    // Get API keys from environment variables
+    const apiKey = process.env.GOOGLE_API_KEY;
+    const cx = process.env.GOOGLE_SEARCH_CX;
 
     if (!apiKey || !cx) {
-      return res.status(400).json({ error: "API key and CX (Custom Search Engine ID) are required" });
+      return res.status(500).json({ error: "Search service configuration is missing" });
     }
 
     const defaultDomains = [
@@ -178,7 +70,7 @@ router.post("/scrape-emails", authenticate, async (req, res) => {
     const domainQueries = allDomains.map((d) => `"${d}"`).join(" OR ");
 
     const sites = req.body.sites || ["google.com", "instagram.com"];
-    const limit = pLimit(1);
+    const limit = pLimit(1); // Limit concurrent requests to avoid rate limiting
 
     const retryWithBackoff = async (fn, retries = 3, delay = 1000) => {
       try {
@@ -192,6 +84,8 @@ router.post("/scrape-emails", authenticate, async (req, res) => {
       }
     };
 
+    console.log(`Starting email scraping for query: "${query}" with domains: ${domainQueries}`);
+    
     const emailPromises = sites.map((site) =>
       limit(() =>
         retryWithBackoff(() =>
@@ -201,25 +95,40 @@ router.post("/scrape-emails", authenticate, async (req, res) => {
     );
 
     const emailResults = await Promise.all(emailPromises);
-    const emails = [...new Set(emailResults.flat().filter(Boolean))]; // Remove duplicates
+    const emails = [...new Set(emailResults.flat().filter(Boolean))]; // Remove duplicates and nulls
 
     if (emails.length === 0) {
-      return res.status(404).json({ message: "No emails found" });
+      return res.status(404).json({ message: "No emails found for this query. Try different keywords or parameters." });
     }
 
-    const newCampaign = new Campaign({
-      userId,
-      campaignName,
-      toolType: "email-scraper",
-      query,
-      recipients: emails,
-      status: "completed",
-    });
+    console.log(`Found ${emails.length} unique emails for query: "${query}"`);
 
-    await newCampaign.save();
+    // Validate emails before saving
+    const validEmails = emails.filter(email => validator.isEmail(email));
+    
+    if (validEmails.length === 0) {
+      return res.status(404).json({ message: "No valid emails found for this query. Try different keywords or parameters." });
+    }
+
+    // Only save the campaign if a valid userId is provided
+    if (userId) {
+      const newCampaign = new Campaign({
+        userId: userIdentifier,
+        campaignName,
+        toolType: "email-scraper",
+        query,
+        recipients: validEmails,
+        status: "completed",
+      });
+
+      await newCampaign.save();
+      console.log(`Campaign created successfully with ID: ${newCampaign._id}`);
+    } else {
+      console.log("No userId provided, skipping campaign creation");
+    }
 
     // Generate CSV file with emails
-    const csvPath = await generateCSV(emails.map(email => ({ email })));
+    const csvPath = await generateCSV(validEmails.map(email => ({ email })));
     
     if (!csvPath) {
       return res.status(500).json({ error: "Failed to generate CSV file" });

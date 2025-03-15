@@ -1,29 +1,27 @@
 const mongoose = require("mongoose");
+const bcrypt = require("bcryptjs");
 
 const UserSchema = new mongoose.Schema(
   {
-    name: { type: String, required: true }, // Full name
+    name: { type: String, required: true },
     username: { type: String, required: true, unique: true },
-    email: { type: String, required: true, unique: true },
-    password: { type: String, required: true }, // Store password as plain text (ensure hashing is done before saving)
+    email: { type: String, required: true, unique: true, lowercase: true, trim: true },
+    password: { type: String, required: true },
+    phone: { type: String, default: null },
+    role: { type: String, enum: ["user", "admin"], default: "user" },
     isVerified: { type: Boolean, default: false },
     verificationToken: { type: String },
     resetPasswordToken: { type: String },
     resetPasswordExpires: { type: Date },
-
+    
     // Subscription-related fields
-    subscriptionPlan: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "SubscriptionPlan", // Reference to the SubscriptionPlan model
-      default: null, // Default to no subscription (Free Plan can be handled in logic)
-    },
-    subscriptionStatus: {
-      type: String,
-      enum: ["active", "inactive", "trial", "cancelled"],
-      default: "inactive",
-    },
+    isPaidUser: { type: Boolean, default: false },
+    currentPlan: { type: String, default: "Free" },
+    subscriptionPlan: { type: mongoose.Schema.Types.ObjectId, ref: "SubscriptionPlan", default: null },
+    subscriptionStatus: { type: String, enum: ["active", "inactive", "trial", "cancelled"], default: "inactive" },
     subscriptionStart: { type: Date, default: null },
-    subscriptionEnd: { type: Date, default: null },
+    subscriptionEndDate: { type: Date, default: null },
+
   },
   {
     timestamps: true,
@@ -32,4 +30,5 @@ const UserSchema = new mongoose.Schema(
   }
 );
 
-module.exports = mongoose.model("User", UserSchema);
+const User = mongoose.model("User", UserSchema);
+module.exports = User;

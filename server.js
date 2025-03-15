@@ -10,7 +10,11 @@ const createCsvWriter = require("csv-writer").createObjectCsvWriter;
 const connectDB = require("./db");
 const { authenticate } = require("./middleware/authMiddleware");
 const Campaign = require("./models/Campaign");
+const User = require("./models/User"); // <-- Added this import
 const { searchGoogleMaps } = require("./routes/NumberScraper");
+const rateLimit = require("express-rate-limit");
+const { checkExpiredSubscriptions } = require("./utils/subscriptionChecker");
+
 const app = express();
 const server = http.createServer(app);
 
@@ -24,20 +28,61 @@ if (!fs.existsSync(publicDir)) {
 // Connect to MongoDB
 connectDB();
 
-// Middleware
-app.use(helmet());
-app.use(cors({
-  origin: process.env.FRONTEND_URL || "http://localhost:5173",
-  methods: ["GET", "POST", "PUT", "DELETE"],
-  allowedHeaders: ["Content-Type", "Authorization"],
-  credentials: true,
-}));
-app.use(express.json());
-app.use(express.static(path.join(__dirname, "public"))); // Serve static files from public directory
+// Apply rate limiting to all requests
+const limiter = rateLimit({
+  windowMs: 15 * 60 * 1000, // 15 minutes
+  max: 100, // Limit each IP to 100 requests per windowMs
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: { error: "Too many requests, please try again later" }
+});
 
-// Logging Middleware
+app.use(limiter);
+
+// Enhanced Middleware
+app.use(
+  helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        scriptSrc: ["'self'", "'unsafe-inline'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        imgSrc: ["'self'", "data:"],
+        connectSrc: ["'self'", process.env.FRONTEND_URL || "http://localhost:5173"],
+      },
+    },
+  })
+);
+
+// Allow requests from the frontend
+app.use(
+  cors({
+    origin: process.env.FRONTEND_URL || "http://localhost:5173",
+    methods: ["GET", "POST", "PUT", "DELETE"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Webhook-Signature"],
+    credentials: true,
+    exposedHeaders: ["Content-Disposition"], // Important for file downloads
+  })
+);
+
+app.use(express.json({ limit: '1mb' })); // Limit JSON payload size
+app.use(express.static(path.join(__dirname, "public")));
+
+// Logging Middleware with improved security
 app.use((req, res, next) => {
-  console.log(`${new Date().toISOString()} - ${req.method} ${req.originalUrl}`);
+  // Don't log sensitive paths
+  const isAuthPath = req.originalUrl.includes("/api/auth");
+  const sensitiveParams = ["password", "token", "key", "secret", "apiKey"];
+  
+  // Sanitize the URL for logging
+  let logUrl = req.originalUrl;
+  
+  // Don't log query parameters for sensitive paths
+  if (isAuthPath && req.originalUrl.includes("?")) {
+    logUrl = req.originalUrl.split("?")[0] + "?[REDACTED]";
+  }
+  
+  console.log(`${new Date().toISOString()} - ${req.method} ${logUrl}`);
   next();
 });
 
@@ -50,54 +95,37 @@ app.use("/api", require("./routes/scraper"));
 app.use("/api", require("./routes/gmailSender"));
 app.use("/api/posts", require("./routes/postRoutes"));
 app.use("/", require("./routes/campaignRoutes"));
+
+// Cashfree Routes
+app.use("/api", require("./routes/cashfree/cashfree"));
+
+// Subscription Routes
 app.use("/api", require("./routes/subscriptionRoutes"));
 
-// Map the frontend's email-scraper endpoint to the actual scrape-emails endpoint
-app.post("/api/email-scraper", async (req, res) => {
+// Direct email-scraper endpoint without internal forwarding - FIXED VERSION
+app.post("/api/email-scraper", authenticate, async (req, res) => {
   try {
-    const { query, campaignName } = req.body;
+    const { query, campaignName, pages = 2, domains } = req.body;
     
     if (!query || !campaignName) {
       return res.status(400).json({ error: "Query and Campaign Name are required" });
     }
 
-    // Forward the request to the scrape-emails endpoint
-    const forwardUrl = `${req.protocol}://${req.get('host')}/api/scrape-emails`;
+    // Forward the request to the scraper instead of modifying req.url
+    const scraperRouter = require("./routes/scraper");
     
-    const response = await fetch(forwardUrl, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': req.headers.authorization
-      },
-      body: JSON.stringify({
-        query,
-        campaignName,
-        pages: 2,  // Default value
-      })
-    });
+    // Create a new request object to pass to the router
+    const scraperReq = { ...req, body: { ...req.body }, user: req.user };
     
-    // Forward the response back to the client
-    res.status(response.status);
-    
-    if (response.headers.get('Content-Type').includes('application/octet-stream')) {
-      const buffer = await response.arrayBuffer();
-      res.setHeader('Content-Type', 'application/octet-stream');
-      res.setHeader('Content-Disposition', 'attachment; filename=emails.csv');
-      return res.send(Buffer.from(buffer));
-    }
-    
-    const data = await response.json();
-    return res.json(data);
+    // Use the scraper route directly
+    return scraperRouter.handle(req, res);
   } catch (error) {
     console.error("Error in /api/email-scraper:", error);
-    return res.status(500).json({ error: "An error occurred while scraping emails" });
+    if (!res.headersSent) {
+      return res.status(500).json({ error: "An error occurred while scraping emails" });
+    }
   }
 });
-
-// Cashfree Routes
-const cashfreeRoute = require("./routes/cashfree/cashfree");
-app.use("/api", cashfreeRoute);
 
 async function saveToCSV(businesses) {
   if (!Array.isArray(businesses) || businesses.length === 0) {
@@ -145,9 +173,18 @@ app.get("/api/numberScraper", authenticate, async (req, res) => {
     return res.status(401).json({ error: "User must be authenticated" });
   }
 
-  const sanitizeInput = (input) => input.replace(/[^\w\s]/gi, "");
+  // Use more robust sanitization
+  const sanitizeInput = (input) => {
+    if (typeof input !== 'string') return '';
+    return input.replace(/[^\w\s]/gi, "").trim().slice(0, 100); // Limit length and trim
+  };
+  
   const sanitizedQuery = sanitizeInput(query);
   const sanitizedCampaignName = sanitizeInput(campaignName);
+
+  if (!sanitizedQuery || !sanitizedCampaignName) {
+    return res.status(400).json({ error: "Invalid query or campaign name after sanitization" });
+  }
 
   try {
     console.log(`Starting Google Maps search for query: ${sanitizedQuery}`);
@@ -158,8 +195,9 @@ app.get("/api/numberScraper", authenticate, async (req, res) => {
     }
 
     const isValidPhoneNumber = (phoneNumber) => {
-      const phoneRegex = /^[+]?[(]?[0-9]{1,4}[)]?[-\s./0-9]*$/;
-      return typeof phoneNumber === "string" && phoneRegex.test(phoneNumber);
+      if (typeof phoneNumber !== "string") return false;
+      const phoneRegex = /^[+]?[(]?[0-9]{1,4}[)]?[-\\s./0-9]*$/;
+      return phoneRegex.test(phoneNumber);
     };
 
     const phoneNumbers = businesses
@@ -187,7 +225,7 @@ app.get("/api/numberScraper", authenticate, async (req, res) => {
     }
 
     const baseUrl = process.env.BASE_URL || "http://localhost:3000";
-    const csvDownloadUrl = `${baseUrl}/api/download?filename=${csvFileName}`;
+    const csvDownloadUrl = `${baseUrl}/api/download?filename=${encodeURIComponent(csvFileName)}`;
     
     res.status(200).json({
       message: "Number scraping completed successfully",
@@ -202,22 +240,33 @@ app.get("/api/numberScraper", authenticate, async (req, res) => {
   }
 });
 
-app.get("/api/download", (req, res) => {
+// Secure file download endpoint
+app.get("/api/download", authenticate, (req, res) => {
   const { filename } = req.query;
   if (!filename) {
     return res.status(400).json({ error: "File name is required" });
   }
 
-  const filePath = path.join(__dirname, "public", filename);
+  // Sanitize filename and prevent path traversal
+  const sanitizedFilename = path.basename(filename);
+  const filePath = path.join(__dirname, "public", sanitizedFilename);
+  
   if (!fs.existsSync(filePath)) {
     return res.status(404).json({ error: "File not found" });
   }
 
-  res.download(filePath, filename, (err) => {
+  res.download(filePath, sanitizedFilename, (err) => {
     if (err) {
       console.error("File download error:", err);
       return res.status(500).json({ error: "Failed to download the file" });
     }
+    
+    // Cleanup file after download (optional)
+    fs.unlink(filePath, (unlinkErr) => {
+      if (unlinkErr) {
+        console.error("Failed to delete file after download:", filePath, unlinkErr);
+      }
+    });
   });
 });
 
@@ -254,7 +303,7 @@ app.get("/api/dashboard", authenticate, async (req, res) => {
         $group: {
           _id: { $dayOfWeek: "$createdAt" },
           sent: { $sum: 1 },
-          opened: { $sum: { $ifNull: ["$openRate", 0] } },
+          opened: { $sum: { $cond: [{ $gt: ["$openRate", 0] }, 1, 0] } },
         },
       },
       {
@@ -279,6 +328,14 @@ app.get("/api/dashboard", authenticate, async (req, res) => {
       .limit(5)
       .select("campaignName status createdAt toolType");
 
+    // Get subscription info
+    const user = await User.findById(userId);
+    const subscriptionInfo = {
+      isPaidUser: user.isPaidUser,
+      currentPlan: user.currentPlan,
+      subscriptionEndDate: user.subscriptionEndDate
+    };
+
     res.json({
       stats: {
         emailCampaigns,
@@ -287,6 +344,7 @@ app.get("/api/dashboard", authenticate, async (req, res) => {
         phoneNumbers: phoneNumbers[0]?.total || 0,
       },
       chartData,
+      subscriptionInfo,
       recentActivities: recentActivities.map((a) => ({
         description: `${a.campaignName} (${a.status})`,
         time: new Date(a.createdAt).toLocaleString(),
@@ -321,10 +379,18 @@ if (process.env.NODE_ENV !== "production") {
   if (process.env.CASHFREE_SECRET_KEY) console.log("Cashfree Secret Key is set");
 }
 
+// Schedule subscription checker to run hourly
+setInterval(() => {
+  console.log("Running subscription check...");
+  checkExpiredSubscriptions();
+}, 60 * 60 * 1000); // Check every hour
+
 // Start Server
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
+  // Run a subscription check on startup
+  checkExpiredSubscriptions();
 }).on("error", (err) => {
   console.error("Server failed to start:", err.message);
 });
