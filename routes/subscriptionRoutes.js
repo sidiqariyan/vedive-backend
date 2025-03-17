@@ -1,31 +1,15 @@
+// backend/routes/subscriptionRoute.js
 const express = require("express");
 const router = express.Router();
-const { authenticate } = require("../middleware/authMiddleware");
-const {
-  getPlans, 
-  createOrder, 
-  verifyPayment,
-  getUserSubscription,
-  checkSubscriptionStatus,
-  cancelSubscription
-} = require("../controllers/subscriptionController");
+const { createSubscriptionOrder, verifyPayment, getSubscriptionStatus } = require("../controllers/subscriptionController");
 
-// Get all available plans
-router.get("/plans", getPlans);
+// POST /api/subscription/createOrder -> Create subscription order
+router.post("/createOrder", createSubscriptionOrder);
 
-// Get current user subscription
-router.get("/subscription", authenticate, getUserSubscription);
+// GET /api/subscription/verifyPayment/:orderid -> Verify subscription payment
+router.get("/verifyPayment/:orderid", verifyPayment);
 
-// Create a new order for plan purchase
-router.post("/create-order", authenticate, createOrder);
-
-// Verify payment after Cashfree callback
-router.post("/verify-payment", verifyPayment);
-
-// Webhook for Cashfree events
-router.post("/cashfree-webhook", checkSubscriptionStatus);
-
-// Cancel current subscription
-router.post("/cancel-subscription", authenticate, cancelSubscription);
+// GET /api/subscription/status -> Get current subscription status
+router.get("/status", getSubscriptionStatus);
 
 module.exports = router;

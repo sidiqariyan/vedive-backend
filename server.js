@@ -10,11 +10,10 @@ const createCsvWriter = require("csv-writer").createObjectCsvWriter;
 const connectDB = require("./db");
 const { authenticate } = require("./middleware/authMiddleware");
 const Campaign = require("./models/Campaign");
-const User = require("./models/User"); // <-- Added this import
+const User = require("./models/User");
 const { searchGoogleMaps } = require("./routes/NumberScraper");
 const rateLimit = require("express-rate-limit");
 const { checkExpiredSubscriptions } = require("./utils/subscriptionChecker");
-
 const app = express();
 const server = http.createServer(app);
 
@@ -34,9 +33,8 @@ const limiter = rateLimit({
   max: 100, // Limit each IP to 100 requests per windowMs
   standardHeaders: true,
   legacyHeaders: false,
-  message: { error: "Too many requests, please try again later" }
+  message: { error: "Too many requests, please try again later" },
 });
-
 app.use(limiter);
 
 // Enhanced Middleware
@@ -65,28 +63,23 @@ app.use(
   })
 );
 
-app.use(express.json({ limit: '1mb' })); // Limit JSON payload size
+app.use(express.json({ limit: "1mb" })); // Limit JSON payload size
 app.use(express.static(path.join(__dirname, "public")));
 
 // Logging Middleware with improved security
 app.use((req, res, next) => {
-  // Don't log sensitive paths
   const isAuthPath = req.originalUrl.includes("/api/auth");
   const sensitiveParams = ["password", "token", "key", "secret", "apiKey"];
-  
-  // Sanitize the URL for logging
   let logUrl = req.originalUrl;
-  
   // Don't log query parameters for sensitive paths
   if (isAuthPath && req.originalUrl.includes("?")) {
     logUrl = req.originalUrl.split("?")[0] + "?[REDACTED]";
   }
-  
   console.log(`${new Date().toISOString()} - ${req.method} ${logUrl}`);
   next();
 });
 
-// Routes - Only include each route once
+// Routes
 app.use("/api/auth", require("./routes/authRoutes"));
 app.use("/api/whatsapp", require("./routes/whatsappRoutes"));
 app.use("/api", require("./routes/bulkMailSender"));
@@ -96,28 +89,21 @@ app.use("/api", require("./routes/gmailSender"));
 app.use("/api/posts", require("./routes/postRoutes"));
 app.use("/", require("./routes/campaignRoutes"));
 
-// Cashfree Routes
-app.use("/api", require("./routes/cashfree/cashfree"));
+// ─── CASHFREE PAYMENT & SUBSCRIPTION ROUTES ───────────────────────────────
+const cashfreeRoute = require("./routes/cashfreeRoute");
+const subscriptionRoute = require("./routes/subscriptionRoutes");
+app.use("/api/payment", cashfreeRoute);
+app.use("/api/subscription", subscriptionRoute);
 
-// Subscription Routes
-app.use("/api", require("./routes/subscriptionRoutes"));
-
-// Direct email-scraper endpoint without internal forwarding - FIXED VERSION
+// Email Scraper Endpoint
 app.post("/api/email-scraper", authenticate, async (req, res) => {
   try {
     const { query, campaignName, pages = 2, domains } = req.body;
-    
     if (!query || !campaignName) {
       return res.status(400).json({ error: "Query and Campaign Name are required" });
     }
-
-    // Forward the request to the scraper instead of modifying req.url
     const scraperRouter = require("./routes/scraper");
-    
-    // Create a new request object to pass to the router
     const scraperReq = { ...req, body: { ...req.body }, user: req.user };
-    
-    // Use the scraper route directly
     return scraperRouter.handle(req, res);
   } catch (error) {
     console.error("Error in /api/email-scraper:", error);
@@ -127,15 +113,14 @@ app.post("/api/email-scraper", authenticate, async (req, res) => {
   }
 });
 
+// Save scraped data to CSV
 async function saveToCSV(businesses) {
   if (!Array.isArray(businesses) || businesses.length === 0) {
     console.error("No businesses data to save.");
     return null;
   }
-
   const csvFileName = `businesses_${uuidv4()}.csv`;
   const csvFilePath = path.join(__dirname, "public", csvFileName);
-
   const csvWriter = createCsvWriter({
     path: csvFilePath,
     header: [
@@ -150,7 +135,6 @@ async function saveToCSV(businesses) {
       { id: "ratingText", title: "Rating" },
     ],
   });
-
   try {
     await csvWriter.writeRecords(businesses);
     console.log(`The CSV file "${csvFilePath}" was written successfully.`);
@@ -161,53 +145,41 @@ async function saveToCSV(businesses) {
   }
 }
 
+// Number Scraper Endpoint
 app.get("/api/numberScraper", authenticate, async (req, res) => {
   const { query, campaignName } = req.query;
-
   if (!query || !campaignName) {
     return res.status(400).json({ error: "Query and Campaign Name are required" });
   }
-
   const userId = req.user?._id;
   if (!userId) {
     return res.status(401).json({ error: "User must be authenticated" });
   }
-
-  // Use more robust sanitization
   const sanitizeInput = (input) => {
-    if (typeof input !== 'string') return '';
-    return input.replace(/[^\w\s]/gi, "").trim().slice(0, 100); // Limit length and trim
+    if (typeof input !== "string") return "";
+    return input.replace(/[^\w\s]/gi, "").trim().slice(0, 100);
   };
-  
   const sanitizedQuery = sanitizeInput(query);
   const sanitizedCampaignName = sanitizeInput(campaignName);
-
   if (!sanitizedQuery || !sanitizedCampaignName) {
     return res.status(400).json({ error: "Invalid query or campaign name after sanitization" });
   }
-
   try {
-    console.log(`Starting Google Maps search for query: ${sanitizedQuery}`);
     const businesses = await searchGoogleMaps(sanitizedQuery);
-
     if (!businesses || businesses.length === 0) {
       return res.status(404).json({ message: "No businesses found" });
     }
-
     const isValidPhoneNumber = (phoneNumber) => {
       if (typeof phoneNumber !== "string") return false;
-      const phoneRegex = /^[+]?[(]?[0-9]{1,4}[)]?[-\\s./0-9]*$/;
+      const phoneRegex = /^[+]?[(]?[0-9]{1,4}[)]?[-\s./0-9]*$/;
       return phoneRegex.test(phoneNumber);
     };
-
     const phoneNumbers = businesses
       .map((business) => business.phone || business.phoneNumber)
       .filter((phoneNumber) => phoneNumber && isValidPhoneNumber(phoneNumber));
-
     if (!phoneNumbers || phoneNumbers.length === 0) {
       return res.status(404).json({ message: "No valid phone numbers found in the scraped data" });
     }
-
     const newCampaign = new Campaign({
       userId,
       campaignName: sanitizedCampaignName,
@@ -216,17 +188,13 @@ app.get("/api/numberScraper", authenticate, async (req, res) => {
       scrapedNumbers: phoneNumbers,
       status: "completed",
     });
-
     await newCampaign.save();
-
     const csvFileName = await saveToCSV(businesses);
     if (!csvFileName) {
       return res.status(500).json({ error: "Failed to save CSV file" });
     }
-
     const baseUrl = process.env.BASE_URL || "http://localhost:3000";
     const csvDownloadUrl = `${baseUrl}/api/download?filename=${encodeURIComponent(csvFileName)}`;
-    
     res.status(200).json({
       message: "Number scraping completed successfully",
       campaignId: newCampaign._id,
@@ -240,28 +208,23 @@ app.get("/api/numberScraper", authenticate, async (req, res) => {
   }
 });
 
-// Secure file download endpoint
+// Secure File Download Endpoint
 app.get("/api/download", authenticate, (req, res) => {
   const { filename } = req.query;
   if (!filename) {
     return res.status(400).json({ error: "File name is required" });
   }
-
-  // Sanitize filename and prevent path traversal
   const sanitizedFilename = path.basename(filename);
   const filePath = path.join(__dirname, "public", sanitizedFilename);
-  
   if (!fs.existsSync(filePath)) {
     return res.status(404).json({ error: "File not found" });
   }
-
   res.download(filePath, sanitizedFilename, (err) => {
     if (err) {
       console.error("File download error:", err);
       return res.status(500).json({ error: "Failed to download the file" });
     }
-    
-    // Cleanup file after download (optional)
+    // Cleanup file after download
     fs.unlink(filePath, (unlinkErr) => {
       if (unlinkErr) {
         console.error("Failed to delete file after download:", filePath, unlinkErr);
@@ -270,33 +233,26 @@ app.get("/api/download", authenticate, (req, res) => {
   });
 });
 
-// Dashboard endpoint
+// Dashboard Endpoint
 app.get("/api/dashboard", authenticate, async (req, res) => {
   try {
     const userId = req.user._id;
-
-    // Fetch stats
-    const emailCampaigns = await Campaign.countDocuments({ 
-      userId, 
-      toolType: { $in: ["mail-sender", "gmail-sender"] } 
+    const emailCampaigns = await Campaign.countDocuments({
+      userId,
+      toolType: { $in: ["mail-sender", "gmail-sender"] },
     });
-    
-    const whatsappMessages = await Campaign.countDocuments({ 
-      userId, 
-      toolType: "whatsapp-bulk-sender" 
+    const whatsappMessages = await Campaign.countDocuments({
+      userId,
+      toolType: "whatsapp-bulk-sender",
     });
-    
     const emailsCollected = await Campaign.aggregate([
       { $match: { userId, toolType: "email-scraper" } },
       { $group: { _id: null, total: { $sum: { $size: "$recipients" } } } },
     ]);
-    
     const phoneNumbers = await Campaign.aggregate([
       { $match: { userId, toolType: "number-scraper" } },
       { $group: { _id: null, total: { $sum: { $size: "$scrapedNumbers" } } } },
     ]);
-
-    // Fetch chart data (messages sent/opened by day)
     const chartData = await Campaign.aggregate([
       { $match: { userId } },
       {
@@ -319,23 +275,18 @@ app.get("/api/dashboard", authenticate, async (req, res) => {
           opened: 1,
         },
       },
-      { $sort: { _id: 1 } }
+      { $sort: { _id: 1 } },
     ]);
-
-    // Recent activities
     const recentActivities = await Campaign.find({ userId })
       .sort({ createdAt: -1 })
       .limit(5)
       .select("campaignName status createdAt toolType");
-
-    // Get subscription info
     const user = await User.findById(userId);
     const subscriptionInfo = {
       isPaidUser: user.isPaidUser,
       currentPlan: user.currentPlan,
-      subscriptionEndDate: user.subscriptionEndDate
+      subscriptionEndDate: user.subscriptionEndDate,
     };
-
     res.json({
       stats: {
         emailCampaigns,
@@ -357,12 +308,12 @@ app.get("/api/dashboard", authenticate, async (req, res) => {
   }
 });
 
-// Health Check Endpoint - only include once
+// Health Check Endpoint
 app.get("/health", (req, res) => {
   res.status(200).json({ status: "OK" });
 });
 
-// Global Error Handling Middleware - only include once
+// Global Error Handling Middleware
 app.use((err, req, res, next) => {
   console.error("Global Error Handler:", err.stack);
   if (process.env.NODE_ENV === "production") {
@@ -370,14 +321,6 @@ app.use((err, req, res, next) => {
   }
   res.status(500).json({ error: err.message });
 });
-
-// Only log sensitive info in development
-if (process.env.NODE_ENV !== "production") {
-  console.log("Environment:", process.env.NODE_ENV);
-  // Don't log actual secrets, just log that they are available
-  if (process.env.CASHFREE_APP_ID) console.log("Cashfree App ID is set");
-  if (process.env.CASHFREE_SECRET_KEY) console.log("Cashfree Secret Key is set");
-}
 
 // Schedule subscription checker to run hourly
 setInterval(() => {
@@ -389,8 +332,7 @@ setInterval(() => {
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-  // Run a subscription check on startup
-  checkExpiredSubscriptions();
+  checkExpiredSubscriptions(); // Run a subscription check on startup
 }).on("error", (err) => {
   console.error("Server failed to start:", err.message);
 });

@@ -1,56 +1,24 @@
 const mongoose = require("mongoose");
 
-const SubscriptionSchema = new mongoose.Schema(
-  {
-    userId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-      required: true,
-    },
-    planId: {
-      type: String,
-      required: true,
-    },
-    planName: {
-      type: String,
-      required: true,
-    },
-    amount: {
-      type: Number,
-      required: true,
-    },
-    durationDays: {
-      type: Number,
-      required: true,
-    },
-    orderId: {
-      type: String,
-      required: true,
-      unique: true,
-    },
-    paymentId: {
-      type: String,
-      default: null,
-    },
-    features: {
-      type: [String],
-      default: [],
-    },
-    status: {
-      type: String,
-      enum: ["pending", "active", "cancelled", "expired"],
-      default: "pending",
-    },
-    startDate: {
-      type: Date,
-      default: null,
-    },
-    endDate: {
-      type: Date,
-      default: null,
-    },
+const subscriptionSchema = new mongoose.Schema({
+  userId: {
+    type: String, // or mongoose.Schema.Types.ObjectId if using a User collection
+    required: true,
+    unique: true  // one subscription record per user
   },
-  { timestamps: true }
-);
+  plan: {
+    type: String,
+    enum: ["free", "starter", "business", "enterprise"],
+    default: "free"
+  },
+  startDate: {
+    type: Date,
+    default: Date.now
+  },
+  endDate: {
+    type: Date,
+    default: null
+  }
+});
 
-module.exports = mongoose.model("Subscription", SubscriptionSchema);
+module.exports = mongoose.model("Subscription", subscriptionSchema);

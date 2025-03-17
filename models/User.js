@@ -13,20 +13,18 @@ const UserSchema = new mongoose.Schema(
     verificationToken: { type: String },
     resetPasswordToken: { type: String },
     resetPasswordExpires: { type: Date },
-    
     // Subscription-related fields
     isPaidUser: { type: Boolean, default: false },
     currentPlan: { type: String, default: "Free" },
     subscriptionPlan: { type: mongoose.Schema.Types.ObjectId, ref: "SubscriptionPlan", default: null },
     subscriptionStatus: { type: String, enum: ["active", "inactive", "trial", "cancelled"], default: "inactive" },
     subscriptionStart: { type: Date, default: null },
-    subscriptionEndDate: { type: Date, default: null },
-
+    subscriptionEndDate: { type: Date, default: null }
   },
   {
     timestamps: true,
     toJSON: { virtuals: true },
-    toObject: { virtuals: true },
+    toObject: { virtuals: true }
   }
 );
 

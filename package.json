@@ -24,6 +24,7 @@
     "express-validator": "^7.2.1",
     "googleapis": "^144.0.0",
     "helmet": "^8.0.0",
+    "joi": "^17.13.3",
     "jsonwebtoken": "^9.0.2",
     "libphonenumber-js": "^1.11.20",
     "mongoose": "^8.10.0",

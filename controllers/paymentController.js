@@ -1,82 +1,87 @@
-const express = require("express");
-const router = express.Router();
+// backend/controllers/paymentController.js
 const axios = require("axios");
-const { app_id, secret_key } = require("../../secret");
+const { secret_key, app_id } = require("../config/secret");
 
-// Create a new payment order
-router.post("/payment", async (req, res) => {
-  const { price, plan } = req.body;
-
-  if (!price || !plan) {
-    return res.status(400).json({ error: "Price and plan details are required." });
-  }
-
+const newOrderId = async (req, res) => {
   try {
+    const orderId = "ORID" + Date.now();
+    const customerId = "CID" + Date.now();
+
     const options = {
       method: "POST",
-      url: "https://api.cashfree.com/pg/orders", // Updated to production endpoint
+      url: "https://sandbox.cashfree.com/pg/orders",
       headers: {
         accept: "application/json",
         "x-api-version": "2022-09-01",
         "content-type": "application/json",
         "x-client-id": app_id,
-        "x-client-secret": secret_key,
+        "x-client-secret": secret_key
       },
       data: {
         customer_details: {
-          customer_id: "CID89898" + Date.now(),
-          customer_email: "waleedsdev@gmail.com", // Replace with dynamic user email
-          customer_phone: "7498608775", // Replace with dynamic user phone
-          customer_name: "Waleed Shaikh", // Replace with dynamic user name
+          customer_id: customerId,
+          customer_email: req.body.email || "customer@example.com",
+          customer_phone: req.body.phone || "1234567890",
+          customer_name: req.body.name || "Customer Name"
         },
         order_meta: {
-          notify_url: "https://webhook.site/d057a7d4-c09a-405c-b44b-3067a1559a07",
-          payment_methods: "cc,dc,upi",
+          notify_url: process.env.CASHFREE_NOTIFY_URL || "https://your-notify-url.com",
+          payment_methods: "cc,dc,upi"
         },
-        order_amount: price,
-        order_id: "ORID665456" + Date.now(),
+        order_amount: req.body.amount || 1,
+        order_id: orderId,
         order_currency: "INR",
-        order_note: `Purchase of ${plan} plan`,
-      },
+        order_note: req.body.note || "Order from API"
+      }
     };
 
     const response = await axios.request(options);
-    return res.status(200).json(response.data.payment_session_id);
+    res.status(200).json({
+      success: true,
+      orderId,
+      paymentSessionId: response.data.payment_session_id,
+      data: response.data
+    });
   } catch (error) {
-    console.error("Error creating Cashfree order:", error.message);
-    return res.status(500).json({ error: "Failed to create payment order." });
+    console.error("Error in newOrderId:", error.message);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
   }
-});
+};
 
-// Check payment status
-router.get("/status/:orderid", async (req, res) => {
-  const { orderid } = req.params;
-
+const checkStatus = async (req, res) => {
+  const orderid = req.params.orderid;
   try {
     const options = {
       method: "GET",
-      url: `https://api.cashfree.com/pg/orders/${orderid}`, // Updated to production endpoint
+      url: `https://sandbox.cashfree.com/pg/orders/${orderid}`,
       headers: {
         accept: "application/json",
         "x-api-version": "2022-09-01",
         "x-client-id": app_id,
-        "x-client-secret": secret_key,
-      },
+        "x-client-secret": secret_key
+      }
     };
 
     const response = await axios.request(options);
-
-    if (response.data.order_status === "PAID") {
-      return res.redirect("http://localhost:5173/success"); // Redirect to success page
-    } else if (response.data.order_status === "ACTIVE") {
-      return res.redirect(`http://localhost:5173/${response.data.payment_session_id}`); // Redirect to payment page
-    } else {
-      return res.redirect("http://localhost:5173/failure"); // Redirect to failure page
-    }
+    res.status(200).json({
+      success: true,
+      orderStatus: response.data.order_status,
+      paymentSessionId: response.data.payment_session_id,
+      data: response.data
+    });
   } catch (error) {
-    console.error("Error checking payment status:", error.message);
-    return res.status(500).json({ error: "Failed to check payment status." });
+    console.error("Error in checkStatus:", error.message);
+    res.status(500).json({
+      success: false,
+      message: error.message
+    });
   }
-});
+};
 
-module.exports = router;
+module.exports = {
+  newOrderId,
+  checkStatus
+};
