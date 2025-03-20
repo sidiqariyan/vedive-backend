@@ -1,6 +1,6 @@
 require("dotenv").config();
 const express = require("express");
-const https = require("https"); // Use https instead of http
+const https = require("https");
 const fs = require("fs");
 const path = require("path");
 const cors = require("cors");
@@ -17,10 +17,10 @@ const { checkExpiredSubscriptions } = require("./utils/subscriptionChecker");
 
 const app = express();
 
-// Load your SSL certificate and key
+// Load SSL certificate and key for HTTPS
 const sslOptions = {
-  key: fs.readFileSync(path.join(__dirname, "server.key")),  // path to your private key
-  cert: fs.readFileSync(path.join(__dirname, "server.cert")), // path to your certificate
+  key: fs.readFileSync(path.join(__dirname, "server.key")),
+  cert: fs.readFileSync(path.join(__dirname, "server.cert")),
 };
 
 // Ensure the public directory exists
@@ -52,31 +52,25 @@ app.use(
         scriptSrc: ["'self'", "'unsafe-inline'"],
         styleSrc: ["'self'", "'unsafe-inline'"],
         imgSrc: ["'self'", "data:"],
+        // Adjust connectSrc as needed
         connectSrc: ["'self'", process.env.FRONTEND_URL || "http://localhost:5173"],
       },
     },
   })
 );
 
-// Updated CORS Configuration
-const allowedOrigins = [
-  "https://precious-peony-be2b76.netlify.app",
-  process.env.FRONTEND_URL || "http://localhost:5173"
-];
-
+// Updated CORS Configuration to allow all origins by reflecting the incoming origin
 app.use(
   cors({
-    origin: function (origin, callback) {
+    origin: (origin, callback) => {
+      // Allow requests with no origin (like mobile apps or curl requests)
       if (!origin) return callback(null, true);
-      if (allowedOrigins.indexOf(origin) !== -1) {
-        return callback(null, true);
-      } else {
-        return callback(new Error("Not allowed by CORS"));
-      }
+      // Reflect the incoming origin
+      return callback(null, origin);
     },
     methods: ["GET", "POST", "PUT", "DELETE"],
     allowedHeaders: ["Content-Type", "Authorization", "X-Webhook-Signature"],
-    credentials: true,
+    credentials: true, // Allow credentials like cookies or auth headers
     exposedHeaders: ["Content-Disposition"],
   })
 );
@@ -110,7 +104,7 @@ const subscriptionRoute = require("./routes/subscriptionRoutes");
 app.use("/api/payment", cashfreeRoute);
 app.use("/api/subscription", subscriptionRoute);
 
-// Email Scraper Endpoint
+// Updated Email Scraper Endpoint using the dedicated handler function
 const { handleEmailScraper } = require("./routes/scraper");
 app.post("/api/email-scraper", authenticate, async (req, res) => {
   try {
