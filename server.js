@@ -332,7 +332,7 @@ setInterval(() => {
 }, 60 * 60 * 1000);
 
 // Create an HTTPS server with the SSL options on port 443 (default HTTPS port)
-const PORT = process.env.PORT || 443;
+const PORT = process.env.PORT;
 https.createServer(sslOptions, app)
   .listen(PORT, () => {
     console.log(`Server running on port ${PORT} over HTTPS`);
