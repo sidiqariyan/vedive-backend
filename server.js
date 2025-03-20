@@ -55,7 +55,7 @@ app.use(
 // Allow requests from the frontend
 app.use(
   cors({
-    origin: "https://precious-peony-be2b76.netlify.app/",
+    origin: "*",
     methods: ["GET", "POST", "PUT", "DELETE"],
     allowedHeaders: ["Content-Type", "Authorization", "X-Webhook-Signature"],
     credentials: true,
