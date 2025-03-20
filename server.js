@@ -1,9 +1,9 @@
 require("dotenv").config();
 const express = require("express");
-const http = require("http");
-const cors = require("cors");
-const path = require("path");
+const https = require("https"); // Use https instead of http
 const fs = require("fs");
+const path = require("path");
+const cors = require("cors");
 const helmet = require("helmet");
 const { v4: uuidv4 } = require("uuid");
 const createCsvWriter = require("csv-writer").createObjectCsvWriter;
@@ -16,7 +16,12 @@ const rateLimit = require("express-rate-limit");
 const { checkExpiredSubscriptions } = require("./utils/subscriptionChecker");
 
 const app = express();
-const server = http.createServer(app);
+
+// Load your SSL certificate and key
+const sslOptions = {
+  key: fs.readFileSync(path.join(__dirname, "server.key")),  // path to your private key
+  cert: fs.readFileSync(path.join(__dirname, "server.cert")), // path to your certificate
+};
 
 // Ensure the public directory exists
 const publicDir = path.join(__dirname, "public");
@@ -38,7 +43,7 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
-// Enhanced Middleware
+// Enhanced Middleware with Helmet
 app.use(
   helmet({
     contentSecurityPolicy: {
@@ -62,7 +67,6 @@ const allowedOrigins = [
 app.use(
   cors({
     origin: function (origin, callback) {
-      // Allow requests with no origin (like mobile apps or curl requests)
       if (!origin) return callback(null, true);
       if (allowedOrigins.indexOf(origin) !== -1) {
         return callback(null, true);
@@ -72,7 +76,7 @@ app.use(
     },
     methods: ["GET", "POST", "PUT", "DELETE"],
     allowedHeaders: ["Content-Type", "Authorization", "X-Webhook-Signature"],
-    credentials: true, // Allow credentials like cookies or authorization headers
+    credentials: true,
     exposedHeaders: ["Content-Disposition"],
   })
 );
@@ -96,7 +100,6 @@ app.use("/api/auth", require("./routes/authRoutes"));
 app.use("/api/whatsapp", require("./routes/whatsappRoutes"));
 app.use("/api", require("./routes/bulkMailSender"));
 app.use("/api/admin", require("./routes/adminRoutes"));
-// Mount the scraper router for other scraping routes (if any)
 app.use("/api", require("./routes/scraper"));
 app.use("/api", require("./routes/gmailSender"));
 app.use("/api/posts", require("./routes/postRoutes"));
@@ -107,8 +110,7 @@ const subscriptionRoute = require("./routes/subscriptionRoutes");
 app.use("/api/payment", cashfreeRoute);
 app.use("/api/subscription", subscriptionRoute);
 
-// -------------------------------------------------------------------
-// Updated Email Scraper Endpoint using the dedicated handler function
+// Email Scraper Endpoint
 const { handleEmailScraper } = require("./routes/scraper");
 app.post("/api/email-scraper", authenticate, async (req, res) => {
   try {
@@ -124,7 +126,6 @@ app.post("/api/email-scraper", authenticate, async (req, res) => {
     }
   }
 });
-// -------------------------------------------------------------------
 
 // Function to save scraped data to CSV remains unchanged
 async function saveToCSV(businesses) {
@@ -206,7 +207,7 @@ app.get("/api/numberScraper", authenticate, async (req, res) => {
     if (!csvFileName) {
       return res.status(500).json({ error: "Failed to save CSV file" });
     }
-    const baseUrl = process.env.BASE_URL || "http://localhost:3000";
+    const baseUrl = process.env.BASE_URL || "https://ec2-51-21-1-175.eu-north-1.compute.amazonaws.com:3000";
     const csvDownloadUrl = `${baseUrl}/api/download?filename=${encodeURIComponent(csvFileName)}`;
     res.status(200).json({
       message: "Number scraping completed successfully",
@@ -341,10 +342,13 @@ setInterval(() => {
   checkExpiredSubscriptions();
 }, 60 * 60 * 1000);
 
+// Create an HTTPS server with the SSL options
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  checkExpiredSubscriptions();
-}).on("error", (err) => {
-  console.error("Server failed to start:", err.message);
-});
+https.createServer(sslOptions, app)
+  .listen(PORT, () => {
+    console.log(`Server running on port ${PORT} over HTTPS`);
+    checkExpiredSubscriptions();
+  })
+  .on("error", (err) => {
+    console.error("Server failed to start:", err.message);
+  });
