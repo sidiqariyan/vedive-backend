@@ -46,11 +46,12 @@ app.use(
         scriptSrc: ["'self'", "'unsafe-inline'"],
         styleSrc: ["'self'", "'unsafe-inline'"],
         imgSrc: ["'self'", "data:"],
-        connectSrc: ["'self'", process.env.FRONTEND_URL || "http://localhost:5173"],
+        connectSrc: ["'self'", "https://precious-peony-be2b76.netlify.app", process.env.FRONTEND_URL || "http://localhost:5173"],
       },
     },
   })
 );
+
 
 // Allow requests from the frontend
 app.use(
