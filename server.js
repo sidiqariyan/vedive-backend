@@ -18,7 +18,7 @@ const { checkExpiredSubscriptions } = require("./utils/subscriptionChecker");
 const app = express();
 
 // Load SSL certificate and key for HTTPS
-// If you're using self-signed certificates, your browser may not trust them by default.
+// Note: Browsers may warn on self-signed certificates.
 const sslOptions = {
   key: fs.readFileSync(path.join(__dirname, "server.key")),
   cert: fs.readFileSync(path.join(__dirname, "server.cert")),
@@ -37,7 +37,7 @@ connectDB();
 // Apply rate limiting to all requests
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per windowMs
+  max: 100,                 // Limit each IP to 100 requests per windowMs
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: "Too many requests, please try again later" },
@@ -45,8 +45,6 @@ const limiter = rateLimit({
 app.use(limiter);
 
 // Enhanced Middleware with Helmet
-// IMPORTANT: We add your Netlify domain to connectSrc so that the browser
-// allows requests to your EC2 instance from that domain.
 app.use(
   helmet({
     contentSecurityPolicy: {
@@ -55,31 +53,18 @@ app.use(
         scriptSrc: ["'self'", "'unsafe-inline'"],
         styleSrc: ["'self'", "'unsafe-inline'"],
         imgSrc: ["'self'", "data:"],
-        connectSrc: [
-          "'self'",
-          // Add your Netlify domain here:
-          "https://precious-peony-be2b76.netlify.app",
-          // Fallback to a local dev environment or the domain in FRONTEND_URL
-          process.env.FRONTEND_URL || "http://localhost:5173",
-        ],
+        // Allow connections from any source
+        connectSrc: ["'self'", process.env.FRONTEND_URL || "http://localhost:5173"],
       },
     },
   })
 );
 
-// Updated CORS Configuration to allow all origins by reflecting the incoming origin
+// Updated CORS Configuration: Allow all origins by echoing back the incoming origin.
 app.use(
   cors({
-    origin: (origin, callback) => {
-      // Allow requests with no origin (mobile apps, server-to-server, etc.)
-      if (!origin) return callback(null, true);
-      // Reflect the incoming origin
-      return callback(null, origin);
-    },
-    methods: ["GET", "POST", "PUT", "DELETE"],
-    allowedHeaders: ["Content-Type", "Authorization", "X-Webhook-Signature"],
-    credentials: true, // Allow credentials like cookies or auth headers
-    exposedHeaders: ["Content-Disposition"],
+    origin: true,        // Reflects the origin of the request, effectively allowing all origins
+    credentials: true,   // Allow credentials such as cookies or auth headers
   })
 );
 
