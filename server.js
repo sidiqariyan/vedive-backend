@@ -1,9 +1,9 @@
 require("dotenv").config();
 const express = require("express");
-const https = require("https");
-const fs = require("fs");
-const path = require("path");
+const http = require("http");
 const cors = require("cors");
+const path = require("path");
+const fs = require("fs");
 const helmet = require("helmet");
 const { v4: uuidv4 } = require("uuid");
 const createCsvWriter = require("csv-writer").createObjectCsvWriter;
@@ -14,15 +14,8 @@ const User = require("./models/User");
 const { searchGoogleMaps } = require("./routes/NumberScraper");
 const rateLimit = require("express-rate-limit");
 const { checkExpiredSubscriptions } = require("./utils/subscriptionChecker");
-
 const app = express();
-
-// Load SSL certificate and key for HTTPS
-// Note: Browsers may warn on self-signed certificates.
-const sslOptions = {
-  key: fs.readFileSync(path.join(__dirname, "server.key")),
-  cert: fs.readFileSync(path.join(__dirname, "server.cert")),
-};
+const server = http.createServer(app);
 
 // Ensure the public directory exists
 const publicDir = path.join(__dirname, "public");
@@ -37,14 +30,14 @@ connectDB();
 // Apply rate limiting to all requests
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100,                 // Limit each IP to 100 requests per windowMs
+  max: 100, // Limit each IP to 100 requests per windowMs
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: "Too many requests, please try again later" },
 });
 app.use(limiter);
 
-// Enhanced Middleware with Helmet
+// Enhanced Middleware
 app.use(
   helmet({
     contentSecurityPolicy: {
@@ -53,17 +46,20 @@ app.use(
         scriptSrc: ["'self'", "'unsafe-inline'"],
         styleSrc: ["'self'", "'unsafe-inline'"],
         imgSrc: ["'self'", "data:"],
-        // Allow connections from any source
         connectSrc: ["'self'", process.env.FRONTEND_URL || "http://localhost:5173"],
       },
     },
   })
 );
 
-// Updated CORS Configuration: Allow all origins by echoing back the incoming origin.
+// Allow requests from the frontend
 app.use(
   cors({
-    origin: "http://localhost:5173",        // Reflects the origin of the request, effectively allowing all origins
+    origin: process.env.FRONTEND_URL || "http://localhost:5173",
+    methods: ["GET", "POST", "PUT", "DELETE"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Webhook-Signature"],
+    credentials: true,
+    exposedHeaders: ["Content-Disposition"],
   })
 );
 
@@ -86,6 +82,7 @@ app.use("/api/auth", require("./routes/authRoutes"));
 app.use("/api/whatsapp", require("./routes/whatsappRoutes"));
 app.use("/api", require("./routes/bulkMailSender"));
 app.use("/api/admin", require("./routes/adminRoutes"));
+// Mount the scraper router for other scraping routes (if any)
 app.use("/api", require("./routes/scraper"));
 app.use("/api", require("./routes/gmailSender"));
 app.use("/api/posts", require("./routes/postRoutes"));
@@ -96,6 +93,7 @@ const subscriptionRoute = require("./routes/subscriptionRoutes");
 app.use("/api/payment", cashfreeRoute);
 app.use("/api/subscription", subscriptionRoute);
 
+// -------------------------------------------------------------------
 // Updated Email Scraper Endpoint using the dedicated handler function
 const { handleEmailScraper } = require("./routes/scraper");
 app.post("/api/email-scraper", authenticate, async (req, res) => {
@@ -112,6 +110,7 @@ app.post("/api/email-scraper", authenticate, async (req, res) => {
     }
   }
 });
+// -------------------------------------------------------------------
 
 // Function to save scraped data to CSV remains unchanged
 async function saveToCSV(businesses) {
@@ -193,7 +192,7 @@ app.get("/api/numberScraper", authenticate, async (req, res) => {
     if (!csvFileName) {
       return res.status(500).json({ error: "Failed to save CSV file" });
     }
-    const baseUrl = process.env.BASE_URL || "https://ec2-51-21-1-175.eu-north-1.compute.amazonaws.com:3000";
+    const baseUrl = process.env.BASE_URL || "http://localhost:3000";
     const csvDownloadUrl = `${baseUrl}/api/download?filename=${encodeURIComponent(csvFileName)}`;
     res.status(200).json({
       message: "Number scraping completed successfully",
@@ -328,13 +327,10 @@ setInterval(() => {
   checkExpiredSubscriptions();
 }, 60 * 60 * 1000);
 
-// Create an HTTPS server with the SSL options
 const PORT = process.env.PORT || 3000;
-https.createServer(sslOptions, app)
-  .listen(PORT, () => {
-    console.log(`Server running on port ${PORT} over HTTPS`);
-    checkExpiredSubscriptions();
-  })
-  .on("error", (err) => {
-    console.error("Server failed to start:", err.message);
-  });
+server.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+  checkExpiredSubscriptions();
+}).on("error", (err) => {
+  console.error("Server failed to start:", err.message);
+});
