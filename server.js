@@ -37,7 +37,7 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
-// Enhanced Middleware
+// Enhanced Middleware with Helmet
 app.use(
   helmet({
     contentSecurityPolicy: {
@@ -46,19 +46,17 @@ app.use(
         scriptSrc: ["'self'", "'unsafe-inline'"],
         styleSrc: ["'self'", "'unsafe-inline'"],
         imgSrc: ["'self'", "data:"],
-        connectSrc: ["'self'", process.env.FRONTEND_URL || "http://localhost:5173"],
+        // Removing restrictions from connectSrc to allow all endpoints
+        connectSrc: ["*"],
       },
     },
   })
 );
 
-// Allow requests from the frontend
-app.use(
-  cors({
-    origin: true
-  })
-);
+// Allow all origins by using the default configuration of CORS
+app.use(cors());
 
+// Parse JSON and serve static files
 app.use(express.json({ limit: "1mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
@@ -78,7 +76,6 @@ app.use("/api/auth", require("./routes/authRoutes"));
 app.use("/api/whatsapp", require("./routes/whatsappRoutes"));
 app.use("/api", require("./routes/bulkMailSender"));
 app.use("/api/admin", require("./routes/adminRoutes"));
-// Mount the scraper router for other scraping routes (if any)
 app.use("/api", require("./routes/scraper"));
 app.use("/api", require("./routes/gmailSender"));
 app.use("/api/posts", require("./routes/postRoutes"));
@@ -89,7 +86,6 @@ const subscriptionRoute = require("./routes/subscriptionRoutes");
 app.use("/api/payment", cashfreeRoute);
 app.use("/api/subscription", subscriptionRoute);
 
-// -------------------------------------------------------------------
 // Updated Email Scraper Endpoint using the dedicated handler function
 const { handleEmailScraper } = require("./routes/scraper");
 app.post("/api/email-scraper", authenticate, async (req, res) => {
@@ -106,9 +102,8 @@ app.post("/api/email-scraper", authenticate, async (req, res) => {
     }
   }
 });
-// -------------------------------------------------------------------
 
-// Function to save scraped data to CSV remains unchanged
+// Function to save scraped data to CSV
 async function saveToCSV(businesses) {
   if (!Array.isArray(businesses) || businesses.length === 0) {
     console.error("No businesses data to save.");
@@ -140,7 +135,7 @@ async function saveToCSV(businesses) {
   }
 }
 
-// Number Scraper Endpoint remains unchanged
+// Number Scraper Endpoint
 app.get("/api/numberScraper", authenticate, async (req, res) => {
   const { query, campaignName } = req.query;
   if (!query || !campaignName) {
@@ -203,7 +198,7 @@ app.get("/api/numberScraper", authenticate, async (req, res) => {
   }
 });
 
-// Secure File Download Endpoint remains unchanged
+// Secure File Download Endpoint
 app.get("/api/download", authenticate, (req, res) => {
   const { filename } = req.query;
   if (!filename) {
@@ -228,7 +223,7 @@ app.get("/api/download", authenticate, (req, res) => {
   });
 });
 
-// Dashboard Endpoint remains unchanged
+// Dashboard Endpoint
 app.get("/api/dashboard", authenticate, async (req, res) => {
   try {
     const userId = req.user._id;
@@ -303,12 +298,12 @@ app.get("/api/dashboard", authenticate, async (req, res) => {
   }
 });
 
-// Health Check Endpoint remains unchanged
+// Health Check Endpoint
 app.get("/health", (req, res) => {
   res.status(200).json({ status: "OK" });
 });
 
-// Global Error Handling Middleware remains unchanged
+// Global Error Handling Middleware
 app.use((err, req, res, next) => {
   console.error("Global Error Handler:", err.stack);
   if (process.env.NODE_ENV === "production") {
