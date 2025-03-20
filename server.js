@@ -55,13 +55,14 @@ app.use(
 // Allow requests from the frontend
 app.use(
   cors({
-    origin: "*",
+    origin: ["https://precious-peony-be2b76.netlify.app"], // <-- Replace with your actual frontend URL
     methods: ["GET", "POST", "PUT", "DELETE"],
     allowedHeaders: ["Content-Type", "Authorization", "X-Webhook-Signature"],
     credentials: true,
     exposedHeaders: ["Content-Disposition"],
   })
 );
+
 
 app.use(express.json({ limit: "1mb" }));
 app.use(express.static(path.join(__dirname, "public")));
