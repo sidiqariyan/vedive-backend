@@ -64,7 +64,6 @@ app.use(
 app.use(
   cors({
     origin: "http://localhost:5173",        // Reflects the origin of the request, effectively allowing all origins
-    credentials: true,   // Allow credentials such as cookies or auth headers
   })
 );
 
