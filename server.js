@@ -18,6 +18,7 @@ const { checkExpiredSubscriptions } = require("./utils/subscriptionChecker");
 const app = express();
 
 // Load SSL certificate and key for HTTPS
+// If you're using self-signed certificates, your browser may not trust them by default.
 const sslOptions = {
   key: fs.readFileSync(path.join(__dirname, "server.key")),
   cert: fs.readFileSync(path.join(__dirname, "server.cert")),
@@ -44,6 +45,8 @@ const limiter = rateLimit({
 app.use(limiter);
 
 // Enhanced Middleware with Helmet
+// IMPORTANT: We add your Netlify domain to connectSrc so that the browser
+// allows requests to your EC2 instance from that domain.
 app.use(
   helmet({
     contentSecurityPolicy: {
@@ -52,8 +55,13 @@ app.use(
         scriptSrc: ["'self'", "'unsafe-inline'"],
         styleSrc: ["'self'", "'unsafe-inline'"],
         imgSrc: ["'self'", "data:"],
-        // Adjust connectSrc as needed
-        connectSrc: ["'self'", process.env.FRONTEND_URL || "http://localhost:5173"],
+        connectSrc: [
+          "'self'",
+          // Add your Netlify domain here:
+          "https://precious-peony-be2b76.netlify.app",
+          // Fallback to a local dev environment or the domain in FRONTEND_URL
+          process.env.FRONTEND_URL || "http://localhost:5173",
+        ],
       },
     },
   })
@@ -63,7 +71,7 @@ app.use(
 app.use(
   cors({
     origin: (origin, callback) => {
-      // Allow requests with no origin (like mobile apps or curl requests)
+      // Allow requests with no origin (mobile apps, server-to-server, etc.)
       if (!origin) return callback(null, true);
       // Reflect the incoming origin
       return callback(null, origin);
