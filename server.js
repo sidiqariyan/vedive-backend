@@ -59,19 +59,17 @@ app.use(
     methods: ["GET", "POST", "PUT", "DELETE"],
     allowedHeaders: ["Content-Type", "Authorization", "X-Webhook-Signature"],
     credentials: true,
-    exposedHeaders: ["Content-Disposition"], // Important for file downloads
+    exposedHeaders: ["Content-Disposition"],
   })
 );
 
-app.use(express.json({ limit: "1mb" })); // Limit JSON payload size
+app.use(express.json({ limit: "1mb" }));
 app.use(express.static(path.join(__dirname, "public")));
 
-// Logging Middleware with improved security
+// Logging Middleware
 app.use((req, res, next) => {
   const isAuthPath = req.originalUrl.includes("/api/auth");
-  const sensitiveParams = ["password", "token", "key", "secret", "apiKey"];
   let logUrl = req.originalUrl;
-  // Don't log query parameters for sensitive paths
   if (isAuthPath && req.originalUrl.includes("?")) {
     logUrl = req.originalUrl.split("?")[0] + "?[REDACTED]";
   }
@@ -79,32 +77,32 @@ app.use((req, res, next) => {
   next();
 });
 
-// Routes
+// Mount routes
 app.use("/api/auth", require("./routes/authRoutes"));
 app.use("/api/whatsapp", require("./routes/whatsappRoutes"));
 app.use("/api", require("./routes/bulkMailSender"));
 app.use("/api/admin", require("./routes/adminRoutes"));
+// Mount the scraper router for other scraping routes (if any)
 app.use("/api", require("./routes/scraper"));
 app.use("/api", require("./routes/gmailSender"));
 app.use("/api/posts", require("./routes/postRoutes"));
 app.use("/", require("./routes/campaignRoutes"));
 
-// ─── CASHFREE PAYMENT & SUBSCRIPTION ROUTES ───────────────────────────────
 const cashfreeRoute = require("./routes/cashfreeRoute");
 const subscriptionRoute = require("./routes/subscriptionRoutes");
 app.use("/api/payment", cashfreeRoute);
 app.use("/api/subscription", subscriptionRoute);
 
-// Email Scraper Endpoint
+// -------------------------------------------------------------------
+// Updated Email Scraper Endpoint using the dedicated handler function
+const { handleEmailScraper } = require("./routes/scraper");
 app.post("/api/email-scraper", authenticate, async (req, res) => {
   try {
-    const { query, campaignName, pages = 2, domains } = req.body;
+    const { query, campaignName } = req.body;
     if (!query || !campaignName) {
       return res.status(400).json({ error: "Query and Campaign Name are required" });
     }
-    const scraperRouter = require("./routes/scraper");
-    const scraperReq = { ...req, body: { ...req.body }, user: req.user };
-    return scraperRouter.handle(req, res);
+    return await handleEmailScraper(req, res);
   } catch (error) {
     console.error("Error in /api/email-scraper:", error);
     if (!res.headersSent) {
@@ -112,8 +110,9 @@ app.post("/api/email-scraper", authenticate, async (req, res) => {
     }
   }
 });
+// -------------------------------------------------------------------
 
-// Save scraped data to CSV
+// Function to save scraped data to CSV remains unchanged
 async function saveToCSV(businesses) {
   if (!Array.isArray(businesses) || businesses.length === 0) {
     console.error("No businesses data to save.");
@@ -145,7 +144,7 @@ async function saveToCSV(businesses) {
   }
 }
 
-// Number Scraper Endpoint
+// Number Scraper Endpoint remains unchanged
 app.get("/api/numberScraper", authenticate, async (req, res) => {
   const { query, campaignName } = req.query;
   if (!query || !campaignName) {
@@ -208,7 +207,7 @@ app.get("/api/numberScraper", authenticate, async (req, res) => {
   }
 });
 
-// Secure File Download Endpoint
+// Secure File Download Endpoint remains unchanged
 app.get("/api/download", authenticate, (req, res) => {
   const { filename } = req.query;
   if (!filename) {
@@ -233,7 +232,7 @@ app.get("/api/download", authenticate, (req, res) => {
   });
 });
 
-// Dashboard Endpoint
+// Dashboard Endpoint remains unchanged
 app.get("/api/dashboard", authenticate, async (req, res) => {
   try {
     const userId = req.user._id;
@@ -308,12 +307,12 @@ app.get("/api/dashboard", authenticate, async (req, res) => {
   }
 });
 
-// Health Check Endpoint
+// Health Check Endpoint remains unchanged
 app.get("/health", (req, res) => {
   res.status(200).json({ status: "OK" });
 });
 
-// Global Error Handling Middleware
+// Global Error Handling Middleware remains unchanged
 app.use((err, req, res, next) => {
   console.error("Global Error Handler:", err.stack);
   if (process.env.NODE_ENV === "production") {
@@ -326,13 +325,12 @@ app.use((err, req, res, next) => {
 setInterval(() => {
   console.log("Running subscription check...");
   checkExpiredSubscriptions();
-}, 60 * 60 * 1000); // Check every hour
+}, 60 * 60 * 1000);
 
-// Start Server
 const PORT = process.env.PORT || 3000;
 server.listen(PORT, () => {
   console.log(`Server running on port ${PORT}`);
-  checkExpiredSubscriptions(); // Run a subscription check on startup
+  checkExpiredSubscriptions();
 }).on("error", (err) => {
   console.error("Server failed to start:", err.message);
 });

@@ -1,15 +1,16 @@
 const express = require("express");
 const router = express.Router();
 const Campaign = require("../models/Campaign");
-// Removed authentication middleware
+const fs = require("fs");
+const path = require("path");
+const validator = require("validator");
+const pLimit = require("p-limit");
+
+// Import the email scraping service and CSV generator utility
 const { scrapeEmails } = require("../services/scrapeService");
 const { generateCSV } = require("../utils/csvWriter");
-const pLimit = require("p-limit");
-const fs = require("fs");
-const validator = require("validator");
-const path = require("path");
 
-// Utility function to parse array fields
+// Utility function to parse array fields (if needed)
 const parseArrayField = (field, fieldName) => {
   if (Array.isArray(field)) return field;
   if (typeof field === "string" && field.trim()) {
@@ -46,17 +47,17 @@ router.post("/scrape-emails", async (req, res) => {
     }
 
     // Use userId from request body instead of authenticated user
-    // If userId is not provided, use a default value or generate one
+    // If userId is not provided, use a default value (anonymous)
     const userIdentifier = userId || "anonymous";
 
     // Get API keys from environment variables
     const apiKey = process.env.GOOGLE_API_KEY;
     const cx = process.env.GOOGLE_SEARCH_CX;
-
     if (!apiKey || !cx) {
       return res.status(500).json({ error: "Search service configuration is missing" });
     }
 
+    // Set default and custom domains
     const defaultDomains = [
       "@gmail.com", "@yahoo.com", "@hotmail.com", "@icloud.com",
       "@aol.com", "@email.com", "@protonmail.com", "@zoho.com",
@@ -64,19 +65,22 @@ router.post("/scrape-emails", async (req, res) => {
       "@fastmail.com", "@sendgrid.com", "@bluehost.com",
       "@qmail.com", "@inbox.com",
     ];
-
     const customDomains = domains || [];
     const allDomains = [...new Set([...defaultDomains, ...customDomains])];
     const domainQueries = allDomains.map((d) => `"${d}"`).join(" OR ");
 
+    // Define sites to search from (defaulting to Google and Instagram)
     const sites = req.body.sites || ["google.com", "instagram.com"];
-    const limit = pLimit(1); // Limit concurrent requests to avoid rate limiting
 
+    // Limit concurrent requests to avoid rate limiting
+    const limit = pLimit(1);
+
+    // Helper function: retry with exponential backoff
     const retryWithBackoff = async (fn, retries = 3, delay = 1000) => {
       try {
         return await fn();
       } catch (err) {
-        if (retries > 0 && (err.response?.status === 429 || err.code === 'ECONNRESET')) {
+        if (retries > 0 && (err.response?.status === 429 || err.code === "ECONNRESET")) {
           await new Promise((resolve) => setTimeout(resolve, delay));
           return retryWithBackoff(fn, retries - 1, delay * 2);
         }
@@ -86,6 +90,7 @@ router.post("/scrape-emails", async (req, res) => {
 
     console.log(`Starting email scraping for query: "${query}" with domains: ${domainQueries}`);
     
+    // Create promises for scraping emails from each site
     const emailPromises = sites.map((site) =>
       limit(() =>
         retryWithBackoff(() =>
@@ -95,7 +100,8 @@ router.post("/scrape-emails", async (req, res) => {
     );
 
     const emailResults = await Promise.all(emailPromises);
-    const emails = [...new Set(emailResults.flat().filter(Boolean))]; // Remove duplicates and nulls
+    // Flatten and remove duplicates
+    const emails = [...new Set(emailResults.flat().filter(Boolean))];
 
     if (emails.length === 0) {
       return res.status(404).json({ message: "No emails found for this query. Try different keywords or parameters." });
@@ -105,12 +111,11 @@ router.post("/scrape-emails", async (req, res) => {
 
     // Validate emails before saving
     const validEmails = emails.filter(email => validator.isEmail(email));
-    
     if (validEmails.length === 0) {
       return res.status(404).json({ message: "No valid emails found for this query. Try different keywords or parameters." });
     }
 
-    // Only save the campaign if a valid userId is provided
+    // Save the campaign if a valid userId is provided
     if (userId) {
       const newCampaign = new Campaign({
         userId: userIdentifier,
@@ -120,29 +125,27 @@ router.post("/scrape-emails", async (req, res) => {
         recipients: validEmails,
         status: "completed",
       });
-
       await newCampaign.save();
       console.log(`Campaign created successfully with ID: ${newCampaign._id}`);
     } else {
       console.log("No userId provided, skipping campaign creation");
     }
 
-    // Generate CSV file with emails
+    // Generate CSV file with the valid emails
     const csvPath = await generateCSV(validEmails.map(email => ({ email })));
-    
     if (!csvPath) {
       return res.status(500).json({ error: "Failed to generate CSV file" });
     }
 
-    // Send the file as a download
+    // Set response headers for file download
     res.setHeader("Content-Type", "application/octet-stream");
     res.setHeader("Content-Disposition", `attachment; filename=emails-${Date.now()}.csv`);
 
     const fileStream = fs.createReadStream(csvPath);
     fileStream.pipe(res);
     
-    // Clean up the file after sending
-    fileStream.on('close', () => {
+    // Clean up file after streaming
+    fileStream.on("close", () => {
       fs.unlink(csvPath, (unlinkErr) => {
         if (unlinkErr) {
           console.error("Failed to delete file:", csvPath, unlinkErr);
@@ -150,7 +153,7 @@ router.post("/scrape-emails", async (req, res) => {
       });
     });
     
-    fileStream.on('error', (err) => {
+    fileStream.on("error", (err) => {
       console.error("File stream error:", err);
       if (!res.headersSent) {
         res.status(500).json({ error: "Error streaming the file" });
