@@ -45,9 +45,9 @@ const limiter = rateLimit({
 app.use(limiter);
 
 
-// Updated CORS Configuration: Allow all origins by echoing back the incoming origin.
+// Updated CORS Configuration: Allow requests from both localhost and Netlify domain
 app.use(cors({
-  origin: "http://localhost:5173", // Change this to match your frontend URL
+  origin: ["http://localhost:5173", "https://precious-peony-be2b76.netlify.app"],
   methods: "GET,POST,PUT,DELETE",
   allowedHeaders: "Content-Type,Authorization",
   credentials: true, // Allows cookies/auth headers
@@ -314,8 +314,8 @@ setInterval(() => {
   checkExpiredSubscriptions();
 }, 60 * 60 * 1000);
 
-// Create an HTTPS server with the SSL options on port 443 (default HTTPS port)
-const PORT = process.env.PORT || 443;
+// Update the port to match what's working in Postman
+const PORT = process.env.PORT || 3000;
 https.createServer(sslOptions, app)
   .listen(PORT, () => {
     console.log(`Server running on port ${PORT} over HTTPS`);
