@@ -47,10 +47,16 @@ app.use(limiter);
 
 // Updated CORS Configuration: Allow requests from both localhost and Netlify domain
 app.use(cors({
-  origin: ["http://localhost:5173", "https://precious-peony-be2b76.netlify.app"],
+  origin: [
+    "http://localhost:5173", 
+    "https://localhost:5173", 
+    "http://precious-peony-be2b76.netlify.app", 
+    "https://precious-peony-be2b76.netlify.app"
+  ],
   methods: "GET,POST,PUT,DELETE",
   allowedHeaders: "Content-Type,Authorization",
   credentials: true, // Allows cookies/auth headers
+  optionsSuccessStatus: 200 // Some legacy browsers (IE11) choke on 204
 }));
 
 app.use(express.json({ limit: "1mb" }));
