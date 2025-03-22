@@ -47,7 +47,7 @@ app.use(limiter);
 
 // Updated CORS Configuration: Allow requests from both localhost and Netlify domain
 app.use(cors({
-  origin: ["http://localhost:5173", "https://thriving-twilight-ee164e.netlify.app/"],
+  origin: ["http://localhost:5173", "https://thriving-twilight-ee164e.netlify.app"],
   methods: "GET,POST,PUT,DELETE",
   allowedHeaders: "Content-Type,Authorization",
   credentials: true, // Allows cookies/auth headers
