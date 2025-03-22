@@ -1,9 +1,9 @@
 require("dotenv").config();
 const express = require("express");
-const https = require("https");
-const fs = require("fs");
-const path = require("path");
+const http = require("http");
 const cors = require("cors");
+const path = require("path");
+const fs = require("fs");
 const helmet = require("helmet");
 const { v4: uuidv4 } = require("uuid");
 const createCsvWriter = require("csv-writer").createObjectCsvWriter;
@@ -14,15 +14,8 @@ const User = require("./models/User");
 const { searchGoogleMaps } = require("./routes/NumberScraper");
 const rateLimit = require("express-rate-limit");
 const { checkExpiredSubscriptions } = require("./utils/subscriptionChecker");
-
 const app = express();
-
-// Load SSL certificate and key for HTTPS
-// Note: If you use a self-signed certificate, browsers may show a security warning.
-const sslOptions = {
-  key: fs.readFileSync(path.join(__dirname, "server.key")),
-  cert: fs.readFileSync(path.join(__dirname, "server.cert")),
-};
+const server = http.createServer(app);
 
 // Ensure the public directory exists
 const publicDir = path.join(__dirname, "public");
@@ -34,30 +27,17 @@ if (!fs.existsSync(publicDir)) {
 // Connect to MongoDB
 connectDB();
 
-// Apply rate limiting to all requests
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100,                 // Limit each IP to 100 requests per windowMs
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: "Too many requests, please try again later" },
-});
-app.use(limiter);
 
-
-// Updated CORS Configuration: Allow requests from both localhost and Netlify domain
-app.use(cors({
-  origin: [
-    "http://localhost:5173", 
-    "https://localhost:5173", 
-    "http://precious-peony-be2b76.netlify.app", 
-    "https://precious-peony-be2b76.netlify.app"
-  ],
-  methods: "GET,POST,PUT,DELETE",
-  allowedHeaders: "Content-Type,Authorization",
-  credentials: true, // Allows cookies/auth headers
-  optionsSuccessStatus: 200 // Some legacy browsers (IE11) choke on 204
-}));
+// Allow requests from the frontend
+app.use(
+  cors({
+    origin: process.env.FRONTEND_URL || "http://localhost:5173",
+    methods: ["GET", "POST", "PUT", "DELETE"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Webhook-Signature"],
+    credentials: true,
+    exposedHeaders: ["Content-Disposition"],
+  })
+);
 
 app.use(express.json({ limit: "1mb" }));
 app.use(express.static(path.join(__dirname, "public")));
@@ -78,6 +58,7 @@ app.use("/api/auth", require("./routes/authRoutes"));
 app.use("/api/whatsapp", require("./routes/whatsappRoutes"));
 app.use("/api", require("./routes/bulkMailSender"));
 app.use("/api/admin", require("./routes/adminRoutes"));
+// Mount the scraper router for other scraping routes (if any)
 app.use("/api", require("./routes/scraper"));
 app.use("/api", require("./routes/gmailSender"));
 app.use("/api/posts", require("./routes/postRoutes"));
@@ -88,6 +69,7 @@ const subscriptionRoute = require("./routes/subscriptionRoutes");
 app.use("/api/payment", cashfreeRoute);
 app.use("/api/subscription", subscriptionRoute);
 
+// -------------------------------------------------------------------
 // Updated Email Scraper Endpoint using the dedicated handler function
 const { handleEmailScraper } = require("./routes/scraper");
 app.post("/api/email-scraper", authenticate, async (req, res) => {
@@ -104,6 +86,7 @@ app.post("/api/email-scraper", authenticate, async (req, res) => {
     }
   }
 });
+// -------------------------------------------------------------------
 
 // Function to save scraped data to CSV remains unchanged
 async function saveToCSV(businesses) {
@@ -185,7 +168,7 @@ app.get("/api/numberScraper", authenticate, async (req, res) => {
     if (!csvFileName) {
       return res.status(500).json({ error: "Failed to save CSV file" });
     }
-    const baseUrl = process.env.BASE_URL || "https://ec2-51-21-1-175.eu-north-1.compute.amazonaws.com";
+    const baseUrl = process.env.BASE_URL || "http://localhost:3000";
     const csvDownloadUrl = `${baseUrl}/api/download?filename=${encodeURIComponent(csvFileName)}`;
     res.status(200).json({
       message: "Number scraping completed successfully",
@@ -320,13 +303,10 @@ setInterval(() => {
   checkExpiredSubscriptions();
 }, 60 * 60 * 1000);
 
-// Update the port to match what's working in Postman
 const PORT = process.env.PORT || 3000;
-https.createServer(sslOptions, app)
-  .listen(PORT, () => {
-    console.log(`Server running on port ${PORT} over HTTPS`);
-    checkExpiredSubscriptions();
-  })
-  .on("error", (err) => {
-    console.error("Server failed to start:", err.message);
-  });
+server.listen(PORT, () => {
+  console.log(`Server running on port ${PORT}`);
+  checkExpiredSubscriptions();
+}).on("error", (err) => {
+  console.error("Server failed to start:", err.message);
+});
