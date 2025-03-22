@@ -30,13 +30,7 @@ connectDB();
 
 // Allow requests from the frontend
 app.use(
-  cors({
-    origin: process.env.FRONTEND_URL || "http://localhost:5173",
-    methods: ["GET", "POST", "PUT", "DELETE"],
-    allowedHeaders: ["Content-Type", "Authorization", "X-Webhook-Signature"],
-    credentials: true,
-    exposedHeaders: ["Content-Disposition"],
-  })
+  cors({})
 );
 
 app.use(express.json({ limit: "1mb" }));
