@@ -30,7 +30,7 @@ connectDB();
 
 // Allow requests from the frontend
 app.use(
-  cors({})
+  cors()
 );
 
 app.use(express.json({ limit: "1mb" }));
