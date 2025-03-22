@@ -49,7 +49,7 @@ app.use(limiter);
 app.use(cors({
   origin: [
     "http://localhost:5173", 
-    "https://snazzy-narwhal-40a292.netlify.app/",
+    "https://snazzy-narwhal-40a292.netlify.app",
     "https://your-new-origin.com"  // Add your additional origin here
   ],
   methods: "GET,POST,PUT,DELETE",
