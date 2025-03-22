@@ -30,13 +30,7 @@ connectDB();
 // CORS configuration - Updated for proper cross-origin access
 app.use(
   cors({
-    origin: [
-      'http://localhost:5173',  // Vite dev server
-      'http://localhost:3000',
-      'http://localhost:5000',
-      'https://vedive.com',     // Add your production domain
-      'https://www.vedive.com'  // Add your production domain with www
-    ],
+    origin:"*",
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true  // Important for cookies/auth
