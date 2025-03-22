@@ -30,7 +30,7 @@ connectDB();
 // CORS configuration - Updated for proper cross-origin access
 app.use(
   cors({
-    origin:"*",
+    origin:true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
     credentials: true  // Important for cookies/auth
