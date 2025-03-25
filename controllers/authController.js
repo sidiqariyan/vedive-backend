@@ -4,9 +4,9 @@ const User = require("../models/User");
 const { sendVerificationEmail, sendResetPasswordEmail } = require("../utils/sendEmail");
 require("dotenv").config();
 
-// Helper Function: Generate JWT Token
-const generateToken = (payload) => {
-  return jwt.sign(payload, process.env.JWT_SECRET, { expiresIn: "1h" });
+// Helper Function: Generate JWT Token with customizable expiry (default "1h")
+const generateToken = (payload, expiresIn = "1h") => {
+  return jwt.sign(payload, process.env.JWT_SECRET, { expiresIn });
 };
 
 /**
@@ -42,13 +42,13 @@ exports.register = async (req, res) => {
     // Save the user to the database
     await user.save();
 
-    // Generate verification token
-    const verificationToken = generateToken({ _id: user._id });
+    // Generate verification token with a 5-minute expiry
+    const verificationToken = generateToken({ _id: user._id }, "5m");
     user.verificationToken = verificationToken;
     await user.save();
 
-    // Send verification email with the token
-    const verificationUrl = `${process.env.CLIENT_URL}/verify-email?token=${verificationToken}`;
+    // Build the verification URL using the CLIENT_URL environment variable
+    const verificationUrl = `${process.env.FRONTEND_URL}/verify-email?token=${verificationToken}`;
     await sendVerificationEmail(email, verificationUrl);
 
     // Respond with success message
@@ -78,7 +78,7 @@ exports.verifyEmail = async (req, res) => {
     user.verificationToken = undefined;
     await user.save();
 
-    // Generate JWT token
+    // Generate JWT token (login token, with default expiry of "1h")
     const authToken = generateToken({ _id: user._id });
     res.status(200).json({ message: "Email verified successfully", token: authToken });
   } catch (error) {
@@ -147,14 +147,14 @@ exports.forgotPassword = async (req, res) => {
       return res.status(400).json({ error: "User not found" });
     }
 
-    // Generate reset password token
+    // Generate reset password token (using default expiry "1h")
     const resetToken = generateToken({ _id: user._id });
     user.resetPasswordToken = resetToken;
     user.resetPasswordExpires = Date.now() + 3600000; // 1 hour
     await user.save();
 
     // Send reset password email
-    const resetUrl = `${process.env.CLIENT_URL}/reset-password?token=${resetToken}`;
+    const resetUrl = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}`;
     await sendResetPasswordEmail(email, resetUrl);
 
     res.status(200).json({ message: "Password reset link sent to your email" });
@@ -172,7 +172,7 @@ exports.resetPassword = async (req, res) => {
   try {
     const { token, newPassword } = req.body;
 
-    // Find user by reset token
+    // Find user by reset token and check if token has not expired
     const user = await User.findOne({
       resetPasswordToken: token,
       resetPasswordExpires: { $gt: Date.now() },
@@ -184,7 +184,7 @@ exports.resetPassword = async (req, res) => {
     // Hash new password
     const hashedPassword = await bcrypt.hash(newPassword, 10);
 
-    // Update user's password
+    // Update user's password and clear reset token fields
     user.password = hashedPassword;
     user.resetPasswordToken = undefined;
     user.resetPasswordExpires = undefined;
