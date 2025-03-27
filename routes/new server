@@ -34,7 +34,6 @@ if (!fs.existsSync(publicDir)) {
 // Connect to MongoDB
 connectDB();
 
-<<<<<<< HEAD
 // Apply rate limiting to all requests
 const limiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes
@@ -45,8 +44,6 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
-=======
->>>>>>> f86777e (new updates:)
 
 // Updated CORS Configuration: Allow requests from both localhost and Netlify domain
 app.use(cors({
@@ -83,17 +80,12 @@ app.use("/api", require("./routes/scraper"));
 app.use("/api", require("./routes/gmailSender"));
 app.use("/api/posts", require("./routes/postRoutes"));
 app.use("/", require("./routes/campaignRoutes"));
-app.use("/api", require("./routes/postRoute"));
+
 const cashfreeRoute = require("./routes/cashfreeRoute");
 const subscriptionRoute = require("./routes/subscriptionRoutes");
-app.use('/api/blog', require('./routes/postRoute'));
 app.use("/api/payment", cashfreeRoute);
 app.use("/api/subscription", subscriptionRoute);
-<<<<<<< HEAD
 
-=======
-// -------------------------------------------------------------------
->>>>>>> f86777e (new updates:)
 // Updated Email Scraper Endpoint using the dedicated handler function
 const { handleEmailScraper } = require("./routes/scraper");
 app.post("/api/email-scraper", authenticate, async (req, res) => {
