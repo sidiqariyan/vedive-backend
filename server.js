@@ -31,7 +31,7 @@ connectDB();
 app.use(cors({
   origin: [
     "http://localhost:5173", 
-   "https://leafy-daffodil-0e2483.netlify.app/"
+   "https://leafy-daffodil-0e2483.netlify.app"
   ],
   methods: "GET,POST,PUT,DELETE",
   allowedHeaders: "Content-Type,Authorization",
