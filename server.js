@@ -46,7 +46,7 @@ const limiter = rateLimit({
 app.use(limiter);
 
 // Updated CORS Configuration: Allow requests from both localhost and Netlify domain
-onst ALLOWED_ORIGINS = [
+const ALLOWED_ORIGINS = [
   "https://famous-cocada-ca7fff.netlify.app",
   "http://localhost:3000",
   "https://localhost:3000"
