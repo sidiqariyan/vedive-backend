@@ -1,6 +1,7 @@
 require("dotenv").config();
 const express = require("express");
-const https = require("https"); // Use HTTPS instead of HTTP
+const http = require("http");
+const https = require("https");
 const fs = require("fs");
 const path = require("path");
 const cors = require("cors");
@@ -14,13 +15,6 @@ const User = require("./models/User");
 const { searchGoogleMaps } = require("./routes/NumberScraper");
 const rateLimit = require("express-rate-limit");
 const { checkExpiredSubscriptions } = require("./utils/subscriptionChecker");
-
-// Read SSL certificate and key files
-// Ensure you have a folder called "certs" with your certificate and key files.
-const sslOptions = {
-  key: fs.readFileSync(path.join(__dirname, "certs", "server.key")),
-  cert: fs.readFileSync(path.join(__dirname, "certs", "server.cert")),
-};
 
 const app = express();
 
@@ -42,35 +36,22 @@ const limiter = rateLimit({
   legacyHeaders: false,
   message: { error: "Too many requests, please try again later" },
 });
-
 app.use(limiter);
 
-// Updated CORS Configuration: Allow requests from both localhost and Netlify domain
-const ALLOWED_ORIGINS = [
-  "https://famous-cocada-ca7fff.netlify.app",
-  "http://localhost:5173",
-  "https://localhost:3000"
-];
-
+// CORS Configuration: Allow your frontend's exact origin
 app.use(
   cors({
-    origin: function(origin, callback) {
-      // Allow requests with no origin (like mobile apps or curl requests)
-      if (!origin) return callback(null, true);
-      
-      if (ALLOWED_ORIGINS.indexOf(origin) === -1) {
-        const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
-        return callback(new Error(msg), false);
-      }
-      return callback(null, true);
-    },
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization", "x-requested-with"],
+    origin: [
+      "http://localhost:5173",
+      "https://leafy-daffodil-0e2483.netlify.app" // Make sure this matches exactly
+    ],
+    methods: "GET,POST,PUT,DELETE,OPTIONS",
+    allowedHeaders: "Content-Type,Authorization",
     credentials: true,
-    maxAge: 86400 // 24 hours
   })
 );
-
+// Handle pre-flight requests for all routes.
+app.options("*", cors());
 
 app.use(express.json({ limit: "1mb" }));
 app.use(express.static(path.join(__dirname, "public")));
@@ -101,7 +82,7 @@ app.use("/api/blog", require("./routes/blogRoute"));
 app.use("/api/payment", cashfreeRoute);
 app.use("/api/subscription", subscriptionRoute);
 
-// Updated Email Scraper Endpoint using the dedicated handler function
+// Updated Email Scraper Endpoint
 const { handleEmailScraper } = require("./routes/scraper");
 app.post("/api/email-scraper", authenticate, async (req, res) => {
   try {
@@ -334,16 +315,26 @@ setInterval(() => {
   checkExpiredSubscriptions();
 }, 60 * 60 * 1000);
 
-// Update the port from environment variables
 const PORT = process.env.PORT || 3000;
 
-// Create HTTPS server with SSL options
-const server = https.createServer(sslOptions, app);
-
-server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT} over HTTPS`);
-  checkExpiredSubscriptions();
-})
-.on("error", (err) => {
-  console.error("Server failed to start:", err.message);
-});
+// Attempt to load SSL certificates and create an HTTPS server; fallback to HTTP if certificates aren’t found.
+let server;
+try {
+  const keyPath = path.join(__dirname, "certs", "server.key");
+  const certPath = path.join(__dirname, "certs", "server.cert");
+  const key = fs.readFileSync(keyPath);
+  const cert = fs.readFileSync(certPath);
+  const sslOptions = { key, cert };
+  server = https.createServer(sslOptions, app);
+  server.listen(PORT, () => {
+    console.log(`HTTPS Server running on port ${PORT}`);
+    checkExpiredSubscriptions();
+  });
+} catch (err) {
+  console.error("SSL certificates not found or error loading them. Falling back to HTTP server.", err);
+  server = http.createServer(app);
+  server.listen(PORT, () => {
+    console.log(`HTTP Server running on port ${PORT}`);
+    checkExpiredSubscriptions();
+  });
+}
