@@ -31,8 +31,7 @@ connectDB();
 app.use(cors({
   origin: [
     "http://localhost:5173", 
-    "https://snazzy-narwhal-40a292.netlify.app",
-    "https://your-new-origin.com"  // Add your additional origin here
+   "https://leafy-daffodil-0e2483.netlify.app/"
   ],
   methods: "GET,POST,PUT,DELETE",
   allowedHeaders: "Content-Type,Authorization",
