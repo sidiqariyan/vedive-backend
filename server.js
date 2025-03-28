@@ -48,7 +48,7 @@ app.use(limiter);
 // Updated CORS Configuration: Allow requests from both localhost and Netlify domain
 const ALLOWED_ORIGINS = [
   "https://famous-cocada-ca7fff.netlify.app",
-  "http://localhost:3000",
+  "http://localhost:5173",
   "https://localhost:3000"
 ];
 
