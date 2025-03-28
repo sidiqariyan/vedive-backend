@@ -1,6 +1,6 @@
 require("dotenv").config();
 const express = require("express");
-const https = require("https");
+const http = require("http");  // Changed from https to http
 const fs = require("fs");
 const path = require("path");
 const cors = require("cors");
@@ -17,13 +17,6 @@ const { checkExpiredSubscriptions } = require("./utils/subscriptionChecker");
 
 const app = express();
 
-// Load SSL certificate and key for HTTPS
-// Note: If you use a self-signed certificate, browsers may show a security warning.
-const sslOptions = {
-  key: fs.readFileSync(path.join(__dirname, "server.key")),
-  cert: fs.readFileSync(path.join(__dirname, "server.cert")),
-};
-
 // Ensure the public directory exists
 const publicDir = path.join(__dirname, "public");
 if (!fs.existsSync(publicDir)) {
@@ -33,20 +26,6 @@ if (!fs.existsSync(publicDir)) {
 
 // Connect to MongoDB
 connectDB();
-
-<<<<<<< HEAD
-// Apply rate limiting to all requests
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100,                 // Limit each IP to 100 requests per windowMs
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: "Too many requests, please try again later" },
-});
-app.use(limiter);
-
-=======
->>>>>>> f86777e (new updates:)
 
 // Updated CORS Configuration: Allow requests from both localhost and Netlify domain
 app.use(cors({
@@ -83,17 +62,12 @@ app.use("/api", require("./routes/scraper"));
 app.use("/api", require("./routes/gmailSender"));
 app.use("/api/posts", require("./routes/postRoutes"));
 app.use("/", require("./routes/campaignRoutes"));
-app.use("/api", require("./routes/postRoute"));
 const cashfreeRoute = require("./routes/cashfreeRoute");
 const subscriptionRoute = require("./routes/subscriptionRoutes");
-app.use('/api/blog', require('./routes/postRoute'));
+app.use('/api/blog', require('./routes/blogRoute'));
 app.use("/api/payment", cashfreeRoute);
 app.use("/api/subscription", subscriptionRoute);
-<<<<<<< HEAD
 
-=======
-// -------------------------------------------------------------------
->>>>>>> f86777e (new updates:)
 // Updated Email Scraper Endpoint using the dedicated handler function
 const { handleEmailScraper } = require("./routes/scraper");
 app.post("/api/email-scraper", authenticate, async (req, res) => {
@@ -310,8 +284,6 @@ app.get("/api/dashboard", authenticate, async (req, res) => {
 app.get("/health", (req, res) => {
   res.status(200).json({ status: "OK" });
 });
-
-// Global Error Handling Middleware remains unchanged
 app.use((err, req, res, next) => {
   console.error("Global Error Handler:", err.stack);
   if (process.env.NODE_ENV === "production") {
@@ -328,11 +300,14 @@ setInterval(() => {
 
 // Update the port to match what's working in Postman
 const PORT = process.env.PORT || 3000;
-https.createServer(sslOptions, app)
-  .listen(PORT, () => {
-    console.log(`Server running on port ${PORT} over HTTPS`);
-    checkExpiredSubscriptions();
-  })
-  .on("error", (err) => {
-    console.error("Server failed to start:", err.message);
-  });
+
+// Use HTTP instead of HTTPS for local development
+const server = http.createServer(app);
+
+server.listen(PORT, () => {
+  console.log(`Server running on port ${PORT} over HTTP`);
+  checkExpiredSubscriptions();
+})
+.on("error", (err) => {
+  console.error("Server failed to start:", err.message);
+});

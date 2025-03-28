@@ -42,8 +42,8 @@ const blogPostSchema = new mongoose.Schema({
   },
   status: {
     type: String,
-    enum: ['draft', 'published'],
-    default: 'draft'
+    enum: ['published'],  // Only "published" is allowed
+    default: 'published'
   },
   views: {
     type: Number,
@@ -82,16 +82,11 @@ blogPostSchema.pre('save', function(next) {
 // Pre-save hook to generate a unique slug from the title
 blogPostSchema.pre('save', async function(next) {
   if (this.isModified('title') || !this.slug) {
-    // Generate initial slug
     let potentialSlug = slugify(this.title, { lower: true, strict: true });
     let slugToCheck = potentialSlug;
     let suffix = 1;
-
-    // Check if the slug already exists
     const BlogPost = mongoose.model('BlogPost', blogPostSchema);
     let slugExists = await BlogPost.findOne({ slug: slugToCheck });
-
-    // If duplicate exists and it's not the current document, append a suffix
     while (slugExists && slugExists._id.toString() !== this._id.toString()) {
       slugToCheck = `${potentialSlug}-${suffix}`;
       slugExists = await BlogPost.findOne({ slug: slugToCheck });

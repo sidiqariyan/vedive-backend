@@ -15,7 +15,6 @@ const storage = multer.diskStorage({
     cb(null, `${uuidv4()}${path.extname(file.originalname)}`);
   }
 });
-
 const upload = multer({
   storage: storage,
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
@@ -32,74 +31,108 @@ const upload = multer({
 // Create a new blog post
 router.post('/create-blog-post', authenticate, upload.single('coverImage'), async (req, res) => {
   try {
-    // Destructure values from req.body
-    let { title, content, category, tags, status } = req.body;
-
-    // Validate and sanitize enum fields; fall back to defaults if not valid.
+    // Destructure only the allowed fields from the request body
+    let { title, content, category, tags } = req.body;
+    
+    // Default category to 'Other' if not provided
     category = category && category !== 'undefined' ? category : 'Other';
-    status = status && status !== 'undefined' ? status : 'draft';
-
-    // Process tags into an array, if provided.
+    
+    // Always set status to "published" (ignoring any client input)
+    const status = 'published';
+    
+    // Generate a slug from the title
+    const slug = title
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+    
     const tagArray = tags ? tags.split(',').map(tag => tag.trim()) : [];
-
-    // Create the new blog post document.
+    
     const newPost = new BlogPost({
       title,
       content,
+      slug, // Add slug generation
       author: req.user._id,
       category,
       tags: tagArray,
       status,
       coverImage: req.file ? `/uploads/blog-images/${req.file.filename}` : null
     });
-
-    // Save the document to MongoDB.
+    
     await newPost.save();
     res.status(201).json(newPost);
   } catch (error) {
-    console.error(error);
+    console.error('Error creating blog post:', error);
     res.status(500).json({ message: 'Error creating blog post' });
   }
 });
 
-// Get all published blog posts
+// Get all published blog posts with filtering and pagination
 router.get('/blog-posts', async (req, res) => {
   try {
-    const { page = 1, limit = 10, category, search } = req.query;
+    const { page = 1, limit = 10, category, search, sortBy = 'createdAt', sortOrder = 'desc' } = req.query;
+
     const query = { status: 'published' };
 
-    if (category) query.category = category;
-    if (search) {
+    if (category && category.trim() !== "") {
+      query.category = category;
+    }
+    
+    if (search && search.trim() !== "") {
       query.$or = [
         { title: { $regex: search, $options: 'i' } },
-        { content: { $regex: search, $options: 'i' } }
+        { content: { $regex: search, $options: 'i' } },
+        { tags: { $regex: search, $options: 'i' } }
       ];
     }
 
+    const sortOptions = { [sortBy]: sortOrder === 'desc' ? -1 : 1 };
+
     const posts = await BlogPost.find(query)
       .populate('author', 'username')
-      .sort({ createdAt: -1 })
-      .skip((page - 1) * limit)
+      .sort(sortOptions)
+      .skip((Number(page) - 1) * Number(limit))
       .limit(Number(limit));
 
     const total = await BlogPost.countDocuments(query);
 
     res.json({
-      posts,
+      posts: posts.map(post => ({
+        _id: post._id,
+        title: post.title,
+        slug: post.slug,
+        content: post.content.substring(0, 200) + '...', // Preview content
+        author: post.author.username,
+        category: post.category,
+        coverImage: post.coverImage,
+        readTime: post.readTime,
+        views: post.views,
+        createdAt: post.createdAt
+      })),
       totalPages: Math.ceil(total / limit),
-      currentPage: page
+      currentPage: Number(page),
+      totalPosts: total
     });
   } catch (error) {
+    console.error('Error fetching blog posts:', error);
     res.status(500).json({ message: 'Error fetching blog posts' });
   }
 });
 
-// Get a single blog post by ID
-router.get('/blog-posts/:id', async (req, res) => {
+// Get a single blog post by ID or slug
+router.get('/blog-posts/:identifier', async (req, res) => {
   try {
-    const post = await BlogPost.findById(req.params.id)
-      .populate('author', 'username')
-      .populate('comments.user', 'username');
+    const { identifier } = req.params;
+    
+    const post = await BlogPost.findOne({
+      $or: [
+        { _id: identifier },
+        { slug: identifier }
+      ],
+      status: 'published' // Ensure only published posts are retrieved
+    })
+    .populate('author', 'username')
+    .populate('comments.user', 'username');
 
     if (!post) {
       return res.status(404).json({ message: 'Post not found' });
@@ -111,6 +144,7 @@ router.get('/blog-posts/:id', async (req, res) => {
 
     res.json(post);
   } catch (error) {
+    console.error('Error fetching blog post:', error);
     res.status(500).json({ message: 'Error fetching blog post' });
   }
 });
