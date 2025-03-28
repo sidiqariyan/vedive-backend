@@ -48,10 +48,8 @@ app.use(limiter);
 // Updated CORS Configuration: Allow requests from both localhost and Netlify domain
 app.use(
   cors({
-    origin: [
-      "http://localhost:5173",
+    origin:
       "https://leafy-daffodil-0e2483.netlify.app",
-    ],
     methods: "GET,POST,PUT,DELETE",
     allowedHeaders: "Content-Type,Authorization",
     credentials: true,
