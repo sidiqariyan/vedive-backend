@@ -49,7 +49,7 @@ app.use(limiter);
 app.use(
   cors({
     origin:
-      "https://leafy-daffodil-0e2483.netlify.app",
+      "https://famous-cocada-ca7fff.netlify.app",
     methods: "GET,POST,PUT,DELETE",
     allowedHeaders: "Content-Type,Authorization",
     credentials: true,
