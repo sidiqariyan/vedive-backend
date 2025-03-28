@@ -46,15 +46,31 @@ const limiter = rateLimit({
 app.use(limiter);
 
 // Updated CORS Configuration: Allow requests from both localhost and Netlify domain
+onst ALLOWED_ORIGINS = [
+  "https://famous-cocada-ca7fff.netlify.app",
+  "http://localhost:3000",
+  "https://localhost:3000"
+];
+
 app.use(
   cors({
-    origin:
-      "https://famous-cocada-ca7fff.netlify.app",
-    methods: "GET,POST,PUT,DELETE",
-    allowedHeaders: "Content-Type,Authorization",
+    origin: function(origin, callback) {
+      // Allow requests with no origin (like mobile apps or curl requests)
+      if (!origin) return callback(null, true);
+      
+      if (ALLOWED_ORIGINS.indexOf(origin) === -1) {
+        const msg = 'The CORS policy for this site does not allow access from the specified Origin.';
+        return callback(new Error(msg), false);
+      }
+      return callback(null, true);
+    },
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "x-requested-with"],
     credentials: true,
+    maxAge: 86400 // 24 hours
   })
 );
+
 
 app.use(express.json({ limit: "1mb" }));
 app.use(express.static(path.join(__dirname, "public")));
