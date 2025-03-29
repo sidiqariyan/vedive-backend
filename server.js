@@ -1,7 +1,6 @@
 require("dotenv").config();
 const express = require("express");
 const http = require("http");
-const https = require("https");
 const fs = require("fs");
 const path = require("path");
 const cors = require("cors");
@@ -179,8 +178,8 @@ app.get("/api/numberScraper", authenticate, async (req, res) => {
     if (!csvFileName) {
       return res.status(500).json({ error: "Failed to save CSV file" });
     }
-    // Use BASE_URL from environment variables and ensure it uses https:// if running on HTTPS
-    const baseUrl = process.env.BASE_URL || "https://ec2-51-21-1-175.eu-north-1.compute.amazonaws.com";
+    // Use BASE_URL from environment variables and ensure it uses HTTP
+    const baseUrl = process.env.BASE_URL || "http://ec2-51-21-1-175.eu-north-1.compute.amazonaws.com";
     const csvDownloadUrl = `${baseUrl}/api/download?filename=${encodeURIComponent(csvFileName)}`;
     res.status(200).json({
       message: "Number scraping completed successfully",
@@ -317,24 +316,8 @@ setInterval(() => {
 
 const PORT = process.env.PORT || 3000;
 
-// Attempt to load SSL certificates and create an HTTPS server; fallback to HTTP if certificates aren’t found.
-let server;
-try {
-  const keyPath = path.join(__dirname, "certs", "server.key");
-  const certPath = path.join(__dirname, "certs", "server.cert");
-  const key = fs.readFileSync(keyPath);
-  const cert = fs.readFileSync(certPath);
-  const sslOptions = { key, cert };
-  server = https.createServer(sslOptions, app);
-  server.listen(PORT, () => {
-    console.log(`HTTPS Server running on port ${PORT}`);
-    checkExpiredSubscriptions();
-  });
-} catch (err) {
-  console.error("SSL certificates not found or error loading them. Falling back to HTTP server.", err);
-  server = http.createServer(app);
-  server.listen(PORT, () => {
-    console.log(`HTTP Server running on port ${PORT}`);
-    checkExpiredSubscriptions();
-  });
-}
+const server = http.createServer(app);
+server.listen(PORT, () => {
+  console.log(`HTTP Server running on port ${PORT}`);
+  checkExpiredSubscriptions();
+});
