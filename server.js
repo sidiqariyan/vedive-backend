@@ -1,6 +1,6 @@
 require("dotenv").config();
 const express = require("express");
-const http = require("http");
+const https = require("https");
 const fs = require("fs");
 const path = require("path");
 const cors = require("cors");
@@ -29,27 +29,26 @@ connectDB();
 
 // Rate Limiter
 const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000, // 15 minutes
-  max: 100, // Limit each IP to 100 requests per windowMs
+  windowMs: 15 * 60 * 1000,
+  max: 100,
   standardHeaders: true,
   legacyHeaders: false,
   message: { error: "Too many requests, please try again later" },
 });
 app.use(limiter);
 
-// CORS Configuration: Allow your frontend's exact origin
+// CORS Configuration: Allow your frontend's exact origin(s)
 app.use(
   cors({
     origin: [
-      "http://localhost:5173",
-      "https://legendary-gumption-ba7177.netlify.app" // Make sure this matches exactly
+      "https://rococo-dolphin-fde6e1.netlify.app", // update as needed
+      "https://your-production-domain.com" // add your production domain here
     ],
     methods: "GET,POST,PUT,DELETE,OPTIONS",
     allowedHeaders: "Content-Type,Authorization",
     credentials: true,
   })
 );
-// Handle pre-flight requests for all routes.
 app.options("*", cors());
 
 app.use(express.json({ limit: "1mb" }));
@@ -66,7 +65,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// Mount routes
+// Mount routes (ensure all your route files are correctly imported)
 app.use("/api/auth", require("./routes/authRoutes"));
 app.use("/api/whatsapp", require("./routes/whatsappRoutes"));
 app.use("/api", require("./routes/bulkMailSender"));
@@ -178,8 +177,8 @@ app.get("/api/numberScraper", authenticate, async (req, res) => {
     if (!csvFileName) {
       return res.status(500).json({ error: "Failed to save CSV file" });
     }
-    // Use BASE_URL from environment variables and ensure it uses HTTP
-    const baseUrl = process.env.BASE_URL || "http://ec2-51-21-1-175.eu-north-1.compute.amazonaws.com";
+    // Ensure your BASE_URL uses HTTPS
+    const baseUrl = process.env.BASE_URL || "https://ec2-51-21-1-175.eu-north-1.compute.amazonaws.com";
     const csvDownloadUrl = `${baseUrl}/api/download?filename=${encodeURIComponent(csvFileName)}`;
     res.status(200).json({
       message: "Number scraping completed successfully",
@@ -316,8 +315,18 @@ setInterval(() => {
 
 const PORT = process.env.PORT || 3000;
 
-const server = http.createServer(app);
-server.listen(PORT, () => {
-  console.log(`HTTP Server running on port ${PORT}`);
-  checkExpiredSubscriptions();
-});
+try {
+  const keyPath = path.join(__dirname, "certs", "server.key");
+  const certPath = path.join(__dirname, "certs", "server.cert");
+  const key = fs.readFileSync(keyPath);
+  const cert = fs.readFileSync(certPath);
+  const sslOptions = { key, cert };
+  const server = https.createServer(sslOptions, app);
+  server.listen(PORT, () => {
+    console.log(`HTTPS Server running on port ${PORT}`);
+    checkExpiredSubscriptions();
+  });
+} catch (err) {
+  console.error("Error loading SSL certificates. Exiting.", err);
+  process.exit(1);
+}
