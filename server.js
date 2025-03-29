@@ -41,7 +41,7 @@ app.use(limiter);
 app.use(
   cors({
     origin: [
-      "https://rococo-dolphin-fde6e1.netlify.app", // update as needed
+      "https://aquamarine-queijadas-8ffe38.netlify.app", // update as needed
       "https://your-production-domain.com" // add your production domain here
     ],
     methods: "GET,POST,PUT,DELETE,OPTIONS",
