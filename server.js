@@ -42,7 +42,7 @@ app.use(
   cors({
     origin: [
       "http://localhost:5173",
-      "https://deft-monstera-75e9fb.netlify.app" // Make sure this matches exactly
+      "https://stately-pithivier-400744.netlify.app" // Make sure this matches exactly
     ],
     methods: "GET,POST,PUT,DELETE,OPTIONS",
     allowedHeaders: "Content-Type,Authorization",
