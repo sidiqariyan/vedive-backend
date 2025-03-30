@@ -1,6 +1,6 @@
 require("dotenv").config();
 const express = require("express");
-const https = require("https");
+const http = require("http");
 const fs = require("fs");
 const path = require("path");
 const cors = require("cors");
@@ -141,7 +141,7 @@ app.get("/api/numberScraper", authenticate, async (req, res) => {
   }
   const sanitizeInput = (input) => {
     if (typeof input !== "string") return "";
-    return input.replace(/[^\w\s]/gi, "").trim().slice(0, 100);
+    return input.replace(/[^\w\\s]/gi, "").trim().slice(0, 100);
   };
   const sanitizedQuery = sanitizeInput(query);
   const sanitizedCampaignName = sanitizeInput(campaignName);
@@ -155,7 +155,7 @@ app.get("/api/numberScraper", authenticate, async (req, res) => {
     }
     const isValidPhoneNumber = (phoneNumber) => {
       if (typeof phoneNumber !== "string") return false;
-      const phoneRegex = /^[+]?[(]?[0-9]{1,4}[)]?[-\s./0-9]*$/;
+      const phoneRegex = /^[+]?[(]?[0-9]{1,4}[)]?[-\\s./0-9]*$/;
       return phoneRegex.test(phoneNumber);
     };
     const phoneNumbers = businesses
@@ -177,7 +177,7 @@ app.get("/api/numberScraper", authenticate, async (req, res) => {
     if (!csvFileName) {
       return res.status(500).json({ error: "Failed to save CSV file" });
     }
-    // Ensure your BASE_URL uses HTTPS
+    // Ensure your BASE_URL uses HTTPS if applicable or update as needed
     const baseUrl = process.env.BASE_URL || "https://ec2-51-21-1-175.eu-north-1.compute.amazonaws.com";
     const csvDownloadUrl = `${baseUrl}/api/download?filename=${encodeURIComponent(csvFileName)}`;
     res.status(200).json({
@@ -314,19 +314,8 @@ setInterval(() => {
 }, 60 * 60 * 1000);
 
 const PORT = process.env.PORT || 3000;
-
-try {
-  const keyPath = path.join(__dirname, "certs", "server.key");
-  const certPath = path.join(__dirname, "certs", "server.cert");
-  const key = fs.readFileSync(keyPath);
-  const cert = fs.readFileSync(certPath);
-  const sslOptions = { key, cert };
-  const server = https.createServer(sslOptions, app);
-  server.listen(PORT, () => {
-    console.log(`HTTPS Server running on port ${PORT}`);
-    checkExpiredSubscriptions();
-  });
-} catch (err) {
-  console.error("Error loading SSL certificates. Exiting.", err);
-  process.exit(1);
-}
+const server = http.createServer(app);
+server.listen(PORT, () => {
+  console.log(`HTTP Server running on port ${PORT}`);
+  checkExpiredSubscriptions();
+});
