@@ -1,6 +1,7 @@
 require("dotenv").config();
 const express = require("express");
 const http = require("http");
+const https = require("https");
 const fs = require("fs");
 const path = require("path");
 const cors = require("cors");
@@ -65,7 +66,7 @@ app.use((req, res, next) => {
   next();
 });
 
-// Mount routes (ensure all your route files are correctly imported)
+// Mount routes
 app.use("/api/auth", require("./routes/authRoutes"));
 app.use("/api/whatsapp", require("./routes/whatsappRoutes"));
 app.use("/api", require("./routes/bulkMailSender"));
@@ -141,7 +142,7 @@ app.get("/api/numberScraper", authenticate, async (req, res) => {
   }
   const sanitizeInput = (input) => {
     if (typeof input !== "string") return "";
-    return input.replace(/[^\w\\s]/gi, "").trim().slice(0, 100);
+    return input.replace(/[^\w\s]/gi, "").trim().slice(0, 100);
   };
   const sanitizedQuery = sanitizeInput(query);
   const sanitizedCampaignName = sanitizeInput(campaignName);
@@ -155,7 +156,7 @@ app.get("/api/numberScraper", authenticate, async (req, res) => {
     }
     const isValidPhoneNumber = (phoneNumber) => {
       if (typeof phoneNumber !== "string") return false;
-      const phoneRegex = /^[+]?[(]?[0-9]{1,4}[)]?[-\\s./0-9]*$/;
+      const phoneRegex = /^[+]?[(]?[0-9]{1,4}[)]?[-\s./0-9]*$/;
       return phoneRegex.test(phoneNumber);
     };
     const phoneNumbers = businesses
@@ -177,7 +178,7 @@ app.get("/api/numberScraper", authenticate, async (req, res) => {
     if (!csvFileName) {
       return res.status(500).json({ error: "Failed to save CSV file" });
     }
-    // Ensure your BASE_URL uses HTTPS if applicable or update as needed
+    // Ensure your BASE_URL uses HTTPS if applicable
     const baseUrl = process.env.BASE_URL || "https://ec2-51-21-1-175.eu-north-1.compute.amazonaws.com";
     const csvDownloadUrl = `${baseUrl}/api/download?filename=${encodeURIComponent(csvFileName)}`;
     res.status(200).json({
@@ -314,8 +315,28 @@ setInterval(() => {
 }, 60 * 60 * 1000);
 
 const PORT = process.env.PORT || 3000;
-const server = http.createServer(app);
-server.listen(PORT, () => {
-  console.log(`HTTP Server running on port ${PORT}`);
-  checkExpiredSubscriptions();
-});
+
+// Determine if HTTPS should be used
+const sslKeyPath = process.env.SSL_KEY_PATH;
+const sslCertPath = process.env.SSL_CERT_PATH;
+
+if (sslKeyPath && sslCertPath && fs.existsSync(sslKeyPath) && fs.existsSync(sslCertPath)) {
+  const privateKey = fs.readFileSync(path.resolve(sslKeyPath), "utf8");
+  const certificate = fs.readFileSync(path.resolve(sslCertPath), "utf8");
+  const credentials = { key: privateKey, cert: certificate };
+  const server = https.createServer(credentials, app);
+  server.listen(PORT, () => {
+    console.log(`HTTPS Server running on port ${PORT}`);
+    checkExpiredSubscriptions();
+  }).on("error", (err) => {
+    console.error("HTTPS Server failed to start:", err.message);
+  });
+} else {
+  const server = http.createServer(app);
+  server.listen(PORT, () => {
+    console.log(`HTTP Server running on port ${PORT}`);
+    checkExpiredSubscriptions();
+  }).on("error", (err) => {
+    console.error("HTTP Server failed to start:", err.message);
+  });
+}
