@@ -1,6 +1,7 @@
 require("dotenv").config();
 const express = require("express");
 const http = require("http");
+const https = require("https");
 const cors = require("cors");
 const path = require("path");
 const fs = require("fs");
@@ -15,7 +16,6 @@ const { searchGoogleMaps } = require("./routes/NumberScraper");
 const rateLimit = require("express-rate-limit");
 const { checkExpiredSubscriptions } = require("./utils/subscriptionChecker");
 const app = express();
-const server = http.createServer(app);
 
 // Ensure the public directory exists
 const publicDir = path.join(__dirname, "public");
@@ -26,7 +26,6 @@ if (!fs.existsSync(publicDir)) {
 
 // Connect to MongoDB
 connectDB();
-
 
 // Allow requests from the frontend
 app.use(
@@ -304,9 +303,32 @@ setInterval(() => {
 }, 60 * 60 * 1000);
 
 const PORT = process.env.PORT || 3000;
-server.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-  checkExpiredSubscriptions();
-}).on("error", (err) => {
-  console.error("Server failed to start:", err.message);
-});
+
+// Determine if HTTPS should be used
+const sslKeyPath = process.env.SSL_KEY_PATH;
+const sslCertPath = process.env.SSL_CERT_PATH;
+
+let server;
+
+if (sslKeyPath && sslCertPath && fs.existsSync(sslKeyPath) && fs.existsSync(sslCertPath)) {
+  // Read SSL certificate and key
+  const privateKey = fs.readFileSync(path.resolve(sslKeyPath), "utf8");
+  const certificate = fs.readFileSync(path.resolve(sslCertPath), "utf8");
+  const credentials = { key: privateKey, cert: certificate };
+  server = https.createServer(credentials, app);
+  server.listen(PORT, () => {
+    console.log(`HTTPS Server running on port ${PORT}`);
+    checkExpiredSubscriptions();
+  }).on("error", (err) => {
+    console.error("HTTPS Server failed to start:", err.message);
+  });
+} else {
+  // Fall back to HTTP if SSL credentials are not provided
+  server = http.createServer(app);
+  server.listen(PORT, () => {
+    console.log(`HTTP Server running on port ${PORT}`);
+    checkExpiredSubscriptions();
+  }).on("error", (err) => {
+    console.error("HTTP Server failed to start:", err.message);
+  });
+}
