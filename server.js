@@ -41,6 +41,7 @@ app.use(limiter);
 app.use(
   cors({
     origin: [
+      "https://localhost:5173/",
       "https://vedive.com", // update as needed
       "https://ec2-51-21-196-40.eu-north-1.compute.amazonaws.com",
       "https://51.21.196.40"// add your production domain here
