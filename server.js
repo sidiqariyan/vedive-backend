@@ -27,13 +27,23 @@ if (!fs.existsSync(publicDir)) {
 // Connect to MongoDB
 connectDB();
 
-// Allow requests from the frontend
+// Setup allowed origins list (adjust as necessary)
+const allowedOrigins = [process.env.FRONTEND_URL || "http://localhost:5173"];
+
+// Updated CORS configuration with dynamic origin checking
 app.use(
   cors({
-    origin: process.env.FRONTEND_URL || "http://localhost:5173",
+    origin: (origin, callback) => {
+      // Allow requests with no origin (like mobile apps or curl requests)
+      if (!origin) return callback(null, true);
+      if (allowedOrigins.indexOf(origin) === -1) {
+        return callback(new Error("Not allowed by CORS"), false);
+      }
+      return callback(null, true);
+    },
     methods: ["GET", "POST", "PUT", "DELETE"],
     allowedHeaders: ["Content-Type", "Authorization", "X-Webhook-Signature"],
-    credentials: true,
+    credentials: true, // Allow credentials (cookies, etc.)
     exposedHeaders: ["Content-Disposition"],
   })
 );
@@ -57,7 +67,6 @@ app.use("/api/auth", require("./routes/authRoutes"));
 app.use("/api/whatsapp", require("./routes/whatsappRoutes"));
 app.use("/api", require("./routes/bulkMailSender"));
 app.use("/api/admin", require("./routes/adminRoutes"));
-// Mount the scraper router for other scraping routes (if any)
 app.use("/api", require("./routes/scraper"));
 app.use("/api", require("./routes/gmailSender"));
 app.use("/api/posts", require("./routes/postRoutes"));
@@ -68,7 +77,6 @@ const subscriptionRoute = require("./routes/subscriptionRoutes");
 app.use("/api/payment", cashfreeRoute);
 app.use("/api/subscription", subscriptionRoute);
 
-// -------------------------------------------------------------------
 // Updated Email Scraper Endpoint using the dedicated handler function
 const { handleEmailScraper } = require("./routes/scraper");
 app.post("/api/email-scraper", authenticate, async (req, res) => {
@@ -85,7 +93,6 @@ app.post("/api/email-scraper", authenticate, async (req, res) => {
     }
   }
 });
-// -------------------------------------------------------------------
 
 // Function to save scraped data to CSV remains unchanged
 async function saveToCSV(businesses) {
