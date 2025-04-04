@@ -1,6 +1,5 @@
 require("dotenv").config();
 const express = require("express");
-const http = require("http");
 const https = require("https");
 const fs = require("fs");
 const path = require("path");
@@ -42,8 +41,9 @@ app.use(limiter);
 app.use(
   cors({
     origin: [
-      "http://ec2-16-16-70-124.eu-north-1.compute.amazonaws.com", // update as needed
-      "https://your-production-domain.com" // add your production domain here
+      "https://vedive.com", // update as needed
+      "https://ec2-51-21-196-40.eu-north-1.compute.amazonaws.com",
+      "https://51.21.196.40"// add your production domain here
     ],
     methods: "GET,POST,PUT,DELETE,OPTIONS",
     allowedHeaders: "Content-Type,Authorization",
@@ -316,27 +316,23 @@ setInterval(() => {
 
 const PORT = process.env.PORT || 3000;
 
-// Determine if HTTPS should be used
+// Determine HTTPS credentials and force HTTPS
 const sslKeyPath = process.env.SSL_KEY_PATH;
 const sslCertPath = process.env.SSL_CERT_PATH;
 
-if (sslKeyPath && sslCertPath && fs.existsSync(sslKeyPath) && fs.existsSync(sslCertPath)) {
-  const privateKey = fs.readFileSync(path.resolve(sslKeyPath), "utf8");
-  const certificate = fs.readFileSync(path.resolve(sslCertPath), "utf8");
-  const credentials = { key: privateKey, cert: certificate };
-  const server = https.createServer(credentials, app);
-  server.listen(PORT, () => {
-    console.log(`HTTPS Server running on port ${PORT}`);
-    checkExpiredSubscriptions();
-  }).on("error", (err) => {
-    console.error("HTTPS Server failed to start:", err.message);
-  });
-} else {
-  const server = http.createServer(app);
-  server.listen(PORT, () => {
-    console.log(`HTTP Server running on port ${PORT}`);
-    checkExpiredSubscriptions();
-  }).on("error", (err) => {
-    console.error("HTTP Server failed to start:", err.message);
-  });
+if (!sslKeyPath || !sslCertPath || !fs.existsSync(sslKeyPath) || !fs.existsSync(sslCertPath)) {
+  console.error("SSL_KEY_PATH and/or SSL_CERT_PATH not provided or files do not exist. Exiting...");
+  process.exit(1);
 }
+
+const privateKey = fs.readFileSync(path.resolve(sslKeyPath), "utf8");
+const certificate = fs.readFileSync(path.resolve(sslCertPath), "utf8");
+const credentials = { key: privateKey, cert: certificate };
+
+const server = https.createServer(credentials, app);
+server.listen(PORT, () => {
+  console.log(`HTTPS Server running on port ${PORT}`);
+  checkExpiredSubscriptions();
+}).on("error", (err) => {
+  console.error("HTTPS Server failed to start:", err.message);
+});
