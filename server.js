@@ -38,13 +38,14 @@ const limiter = rateLimit({
 app.use(limiter);
 
 // CORS Configuration: Allow your frontend's exact origin(s)
+// Note: Adjust the protocol (http vs https) and remove trailing slashes to ensure an exact match.
 app.use(
   cors({
     origin: [
-      "https://localhost:5173/",
-      "https://vedive.com", // update as needed
+      "http://localhost:5173",            // development - adjust protocol if needed
+      "https://vedive.com",                // production domain example
       "https://ec2-51-21-196-40.eu-north-1.compute.amazonaws.com",
-      "https://51.21.196.40"// add your production domain here
+      "https://51.21.196.40"               // production alternative domain
     ],
     methods: "GET,POST,PUT,DELETE,OPTIONS",
     allowedHeaders: "Content-Type,Authorization",
