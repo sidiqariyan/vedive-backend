@@ -1,8 +1,8 @@
 require("dotenv").config();
 const express = require("express");
-const https = require("https");
 const fs = require("fs");
 const path = require("path");
+// Removed: const https = require("https");
 // Removed: const cors = require("cors");
 // Removed: const helmet = require("helmet");
 const { v4: uuidv4 } = require("uuid");
@@ -322,55 +322,7 @@ setInterval(() => {
 
 const PORT = process.env.PORT || 3000;
 
-// HTTPS server setup with error handling
-const setupServer = () => {
-  try {
-    // Determine HTTPS credentials
-    const sslKeyPath = process.env.SSL_KEY_PATH;
-    const sslCertPath = process.env.SSL_CERT_PATH;
-
-    if (!sslKeyPath || !sslCertPath || !fs.existsSync(sslKeyPath) || !fs.existsSync(sslCertPath)) {
-      console.error("SSL certificate files not found. Checking for environment variables...");
-      
-      // Alternative approach - using environment variables directly (if available)
-      const privateKey = process.env.SSL_PRIVATE_KEY || fs.readFileSync(path.resolve(sslKeyPath), "utf8");
-      const certificate = process.env.SSL_CERTIFICATE || fs.readFileSync(path.resolve(sslCertPath), "utf8");
-      
-      if (!privateKey || !certificate) {
-        throw new Error("SSL credentials not available. Server cannot start securely.");
-      }
-      
-      const credentials = { key: privateKey, cert: certificate };
-      
-      // Create HTTPS server with proper error handling
-      const server = https.createServer(credentials, app);
-      
-      server.listen(PORT, () => {
-        console.log(`HTTPS Server running on port ${PORT}`);
-        checkExpiredSubscriptions();
-      }).on("error", (err) => {
-        console.error("HTTPS Server failed to start:", err.message);
-        process.exit(1);
-      });
-    } else {
-      const privateKey = fs.readFileSync(path.resolve(sslKeyPath), "utf8");
-      const certificate = fs.readFileSync(path.resolve(sslCertPath), "utf8");
-      const credentials = { key: privateKey, cert: certificate };
-      
-      const server = https.createServer(credentials, app);
-      
-      server.listen(PORT, () => {
-        console.log(`HTTPS Server running on port ${PORT}`);
-        checkExpiredSubscriptions();
-      }).on("error", (err) => {
-        console.error("HTTPS Server failed to start:", err.message);
-        process.exit(1);
-      });
-    }
-  } catch (error) {
-    console.error("Fatal error during server setup:", error);
-    process.exit(1);
-  }
-};
-
-setupServer();
+app.listen(PORT, () => {
+  console.log(`HTTP Server running on port ${PORT}`);
+  checkExpiredSubscriptions();
+});
