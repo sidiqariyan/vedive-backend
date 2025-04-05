@@ -42,6 +42,7 @@ app.use(limiter);
 app.use(
   cors({
     origin: [
+      "https://glittering-sprinkles-53116e.netlify.app",
       "http://localhost:5173",            // development - adjust protocol if needed
       "https://vedive.com",                // production domain example
       "https://ec2-51-21-196-40.eu-north-1.compute.amazonaws.com",
