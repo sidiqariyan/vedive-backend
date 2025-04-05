@@ -37,23 +37,32 @@ const limiter = rateLimit({
 });
 app.use(limiter);
 
-// CORS Configuration: Allow your frontend's exact origin(s)
-// Note: Adjust the protocol (http vs https) and remove trailing slashes to ensure an exact match.
+// CORS Configuration - Updated to be more permissive during development
+// In production, you should restrict to specific origins
 app.use(
   cors({
-    origin: [
-      "https://loquacious-palmier-974aa2.netlify.app",
-      "http://localhost:5173",            // development - adjust protocol if needed
-      "https://vedive.com",                // production domain example
-      "https://ec2-51-21-196-40.eu-north-1.compute.amazonaws.com",
-      "https://51.21.196.40"               // production alternative domain
-    ],
+    // Allow requests from any origin during development
+    origin: true,
     methods: "GET,POST,PUT,DELETE,OPTIONS",
     allowedHeaders: "Content-Type,Authorization",
     credentials: true,
+    // Sets proper Vary header with Origin for caching
+    maxAge: 86400,
   })
 );
-app.options("*", cors());
+
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'", "https://cdnjs.cloudflare.com", "https://sdk.cashfree.com"],
+      connectSrc: ["'self'", "https://ec2-51-21-1-175.eu-north-1.compute.amazonaws.com:3000", "https://vedive.com"],
+      // Add other directives as needed
+    }
+  },
+  // Don't block requests when certificate issues arise
+  hsts: false
+}));
 
 app.use(express.json({ limit: "1mb" }));
 app.use(express.static(path.join(__dirname, "public")));
@@ -66,6 +75,16 @@ app.use((req, res, next) => {
     logUrl = req.originalUrl.split("?")[0] + "?[REDACTED]";
   }
   console.log(`${new Date().toISOString()} - ${req.method} ${logUrl}`);
+  next();
+});
+
+// Set secure cookie options
+app.use((req, res, next) => {
+  res.cookie('cookieName', 'cookieValue', {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'lax'
+  });
   next();
 });
 
@@ -181,9 +200,9 @@ app.get("/api/numberScraper", authenticate, async (req, res) => {
     if (!csvFileName) {
       return res.status(500).json({ error: "Failed to save CSV file" });
     }
-    // Ensure your BASE_URL uses HTTPS if applicable
-    const baseUrl = process.env.BASE_URL || "https://ec2-51-21-1-175.eu-north-1.compute.amazonaws.com";
-    const csvDownloadUrl = `${baseUrl}/api/download?filename=${encodeURIComponent(csvFileName)}`;
+    
+    // Use relative URLs to avoid CORS and certificate issues
+    const csvDownloadUrl = `/api/download?filename=${encodeURIComponent(csvFileName)}`;
     res.status(200).json({
       message: "Number scraping completed successfully",
       campaignId: newCampaign._id,
@@ -319,23 +338,55 @@ setInterval(() => {
 
 const PORT = process.env.PORT || 3000;
 
-// Determine HTTPS credentials and force HTTPS
-const sslKeyPath = process.env.SSL_KEY_PATH;
-const sslCertPath = process.env.SSL_CERT_PATH;
+// HTTPS server setup with error handling
+const setupServer = () => {
+  try {
+    // Determine HTTPS credentials
+    const sslKeyPath = process.env.SSL_KEY_PATH;
+    const sslCertPath = process.env.SSL_CERT_PATH;
 
-if (!sslKeyPath || !sslCertPath || !fs.existsSync(sslKeyPath) || !fs.existsSync(sslCertPath)) {
-  console.error("SSL_KEY_PATH and/or SSL_CERT_PATH not provided or files do not exist. Exiting...");
-  process.exit(1);
-}
+    if (!sslKeyPath || !sslCertPath || !fs.existsSync(sslKeyPath) || !fs.existsSync(sslCertPath)) {
+      console.error("SSL certificate files not found. Checking for environment variables...");
+      
+      // Alternative approach - using environment variables directly (if available)
+      const privateKey = process.env.SSL_PRIVATE_KEY || fs.readFileSync(path.resolve(sslKeyPath), "utf8");
+      const certificate = process.env.SSL_CERTIFICATE || fs.readFileSync(path.resolve(sslCertPath), "utf8");
+      
+      if (!privateKey || !certificate) {
+        throw new Error("SSL credentials not available. Server cannot start securely.");
+      }
+      
+      const credentials = { key: privateKey, cert: certificate };
+      
+      // Create HTTPS server with proper error handling
+      const server = https.createServer(credentials, app);
+      
+      server.listen(PORT, () => {
+        console.log(`HTTPS Server running on port ${PORT}`);
+        checkExpiredSubscriptions();
+      }).on("error", (err) => {
+        console.error("HTTPS Server failed to start:", err.message);
+        process.exit(1);
+      });
+    } else {
+      const privateKey = fs.readFileSync(path.resolve(sslKeyPath), "utf8");
+      const certificate = fs.readFileSync(path.resolve(sslCertPath), "utf8");
+      const credentials = { key: privateKey, cert: certificate };
+      
+      const server = https.createServer(credentials, app);
+      
+      server.listen(PORT, () => {
+        console.log(`HTTPS Server running on port ${PORT}`);
+        checkExpiredSubscriptions();
+      }).on("error", (err) => {
+        console.error("HTTPS Server failed to start:", err.message);
+        process.exit(1);
+      });
+    }
+  } catch (error) {
+    console.error("Fatal error during server setup:", error);
+    process.exit(1);
+  }
+};
 
-const privateKey = fs.readFileSync(path.resolve(sslKeyPath), "utf8");
-const certificate = fs.readFileSync(path.resolve(sslCertPath), "utf8");
-const credentials = { key: privateKey, cert: certificate };
-
-const server = https.createServer(credentials, app);
-server.listen(PORT, () => {
-  console.log(`HTTPS Server running on port ${PORT}`);
-  checkExpiredSubscriptions();
-}).on("error", (err) => {
-  console.error("HTTPS Server failed to start:", err.message);
-});
+setupServer();
