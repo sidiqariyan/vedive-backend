@@ -3,8 +3,8 @@ const express = require("express");
 const https = require("https");
 const fs = require("fs");
 const path = require("path");
-const cors = require("cors");
-const helmet = require("helmet");
+// Removed: const cors = require("cors");
+// Removed: const helmet = require("helmet");
 const { v4: uuidv4 } = require("uuid");
 const createCsvWriter = require("csv-writer").createObjectCsvWriter;
 const connectDB = require("./db");
@@ -12,7 +12,7 @@ const { authenticate } = require("./middleware/authMiddleware");
 const Campaign = require("./models/Campaign");
 const User = require("./models/User");
 const { searchGoogleMaps } = require("./routes/NumberScraper");
-const rateLimit = require("express-rate-limit");
+// Removed: const rateLimit = require("express-rate-limit");
 const { checkExpiredSubscriptions } = require("./utils/subscriptionChecker");
 
 const app = express();
@@ -27,42 +27,26 @@ if (!fs.existsSync(publicDir)) {
 // Connect to MongoDB
 connectDB();
 
-// Rate Limiter
-const limiter = rateLimit({
-  windowMs: 15 * 60 * 1000,
-  max: 100,
-  standardHeaders: true,
-  legacyHeaders: false,
-  message: { error: "Too many requests, please try again later" },
+// Removed Rate Limiter configuration and middleware
+
+// Manual CORS Middleware - similar to the previous configuration
+app.use((req, res, next) => {
+  // Allow the origin from the request or default to "*"
+  const origin = req.headers.origin || "*";
+  res.header("Access-Control-Allow-Origin", origin);
+  res.header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
+  res.header("Access-Control-Allow-Headers", "Content-Type,Authorization");
+  res.header("Access-Control-Allow-Credentials", "true");
+  res.header("Access-Control-Max-Age", "86400");
+
+  // Intercept OPTIONS method
+  if (req.method === "OPTIONS") {
+    return res.sendStatus(200);
+  }
+  next();
 });
-app.use(limiter);
 
-// CORS Configuration - Updated to be more permissive during development
-// In production, you should restrict to specific origins
-app.use(
-  cors({
-    // Allow requests from any origin during development
-    origin: true,
-    methods: "GET,POST,PUT,DELETE,OPTIONS",
-    allowedHeaders: "Content-Type,Authorization",
-    credentials: true,
-    // Sets proper Vary header with Origin for caching
-    maxAge: 86400,
-  })
-);
-
-app.use(helmet({
-  contentSecurityPolicy: {
-    directives: {
-      defaultSrc: ["'self'"],
-      scriptSrc: ["'self'", "https://cdnjs.cloudflare.com", "https://sdk.cashfree.com"],
-      connectSrc: ["'self'", "https://ec2-51-21-1-175.eu-north-1.compute.amazonaws.com:3000", "https://vedive.com"],
-      // Add other directives as needed
-    }
-  },
-  // Don't block requests when certificate issues arise
-  hsts: false
-}));
+// Removed Helmet middleware
 
 app.use(express.json({ limit: "1mb" }));
 app.use(express.static(path.join(__dirname, "public")));
