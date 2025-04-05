@@ -314,8 +314,8 @@ setInterval(() => {
 }, 60 * 60 * 1000);
 
 const PORT = process.env.PORT || 3000;
-const SSL_KEY_PATH = path.join(__dirname, "certs", "key.pem");
-const SSL_CERT_PATH = path.join(__dirname, "certs", "cert.pem");
+const SSL_KEY_PATH = path.join(__dirname, "key.pem");
+const SSL_CERT_PATH = path.join(__dirname, "cert.pem");
 
 const sslOptions = {
   key: fs.readFileSync(SSL_KEY_PATH),
