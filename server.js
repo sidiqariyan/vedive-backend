@@ -2,9 +2,7 @@ require("dotenv").config();
 const express = require("express");
 const fs = require("fs");
 const path = require("path");
-// Removed: const https = require("https");
-// Removed: const cors = require("cors");
-// Removed: const helmet = require("helmet");
+const https = require("https"); // Added HTTPS module
 const { v4: uuidv4 } = require("uuid");
 const createCsvWriter = require("csv-writer").createObjectCsvWriter;
 const connectDB = require("./db");
@@ -12,7 +10,6 @@ const { authenticate } = require("./middleware/authMiddleware");
 const Campaign = require("./models/Campaign");
 const User = require("./models/User");
 const { searchGoogleMaps } = require("./routes/NumberScraper");
-// Removed: const rateLimit = require("express-rate-limit");
 const { checkExpiredSubscriptions } = require("./utils/subscriptionChecker");
 
 const app = express();
@@ -26,8 +23,6 @@ if (!fs.existsSync(publicDir)) {
 
 // Connect to MongoDB
 connectDB();
-
-// Removed Rate Limiter configuration and middleware
 
 // Manual CORS Middleware - similar to the previous configuration
 app.use((req, res, next) => {
@@ -45,8 +40,6 @@ app.use((req, res, next) => {
   }
   next();
 });
-
-// Removed Helmet middleware
 
 app.use(express.json({ limit: "1mb" }));
 app.use(express.static(path.join(__dirname, "public")));
@@ -321,8 +314,15 @@ setInterval(() => {
 }, 60 * 60 * 1000);
 
 const PORT = process.env.PORT || 3000;
+const SSL_KEY_PATH = path.join(__dirname, "certs", "key.pem");
+const SSL_CERT_PATH = path.join(__dirname, "certs", "cert.pem");
 
-app.listen(PORT, () => {
-  console.log(`HTTP Server running on port ${PORT}`);
+const sslOptions = {
+  key: fs.readFileSync(SSL_KEY_PATH),
+  cert: fs.readFileSync(SSL_CERT_PATH),
+};
+
+https.createServer(sslOptions, app).listen(PORT, () => {
+  console.log(`HTTPS Server running on https://localhost:${PORT}`);
   checkExpiredSubscriptions();
 });
