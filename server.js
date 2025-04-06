@@ -2,9 +2,11 @@ require("dotenv").config();
 const express = require("express");
 const fs = require("fs");
 const path = require("path");
-const https = require("https"); // Added HTTPS module
+const https = require("https");
 const { v4: uuidv4 } = require("uuid");
 const createCsvWriter = require("csv-writer").createObjectCsvWriter;
+const cors = require("cors");
+const helmet = require("helmet");
 const connectDB = require("./db");
 const { authenticate } = require("./middleware/authMiddleware");
 const Campaign = require("./models/Campaign");
@@ -24,27 +26,23 @@ if (!fs.existsSync(publicDir)) {
 // Connect to MongoDB
 connectDB();
 
-// Manual CORS Middleware - similar to the previous configuration
-app.use((req, res, next) => {
-  // Allow the origin from the request or default to "*"
-  const origin = req.headers.origin || "*";
-  res.header("Access-Control-Allow-Origin", origin);
-  res.header("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
-  res.header("Access-Control-Allow-Headers", "Content-Type,Authorization");
-  res.header("Access-Control-Allow-Credentials", "true");
-  res.header("Access-Control-Max-Age", "86400");
+// Use Helmet for security best practices
+app.use(helmet());
 
-  // Intercept OPTIONS method
-  if (req.method === "OPTIONS") {
-    return res.sendStatus(200);
-  }
-  next();
-});
+// Use CORS middleware to allow requests from any origin
+app.use(
+  cors({
+    origin: true, // Allow any origin
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization"],
+    credentials: true,
+  })
+);
 
 app.use(express.json({ limit: "1mb" }));
-app.use(express.static(path.join(__dirname, "public")));
+app.use(express.static(publicDir));
 
-// Logging Middleware
+// Logging Middleware (custom)
 app.use((req, res, next) => {
   const isAuthPath = req.originalUrl.includes("/api/auth");
   let logUrl = req.originalUrl;
@@ -55,12 +53,12 @@ app.use((req, res, next) => {
   next();
 });
 
-// Set secure cookie options
+// Set secure cookie options for all responses
 app.use((req, res, next) => {
-  res.cookie('cookieName', 'cookieValue', {
+  res.cookie("cookieName", "cookieValue", {
     httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'lax'
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
   });
   next();
 });
@@ -74,6 +72,7 @@ app.use("/api", require("./routes/scraper"));
 app.use("/api", require("./routes/gmailSender"));
 app.use("/api/posts", require("./routes/postRoutes"));
 app.use("/", require("./routes/campaignRoutes"));
+
 const cashfreeRoute = require("./routes/cashfreeRoute");
 const subscriptionRoute = require("./routes/subscriptionRoutes");
 app.use("/api/blog", require("./routes/blogRoute"));
@@ -104,7 +103,7 @@ async function saveToCSV(businesses) {
     return null;
   }
   const csvFileName = `businesses_${uuidv4()}.csv`;
-  const csvFilePath = path.join(__dirname, "public", csvFileName);
+  const csvFilePath = path.join(publicDir, csvFileName);
   const csvWriter = createCsvWriter({
     path: csvFilePath,
     header: [
@@ -178,7 +177,7 @@ app.get("/api/numberScraper", authenticate, async (req, res) => {
       return res.status(500).json({ error: "Failed to save CSV file" });
     }
     
-    // Use relative URLs to avoid CORS and certificate issues
+    // Use relative URL for CSV download to avoid potential CORS/certificate issues
     const csvDownloadUrl = `/api/download?filename=${encodeURIComponent(csvFileName)}`;
     res.status(200).json({
       message: "Number scraping completed successfully",
@@ -200,7 +199,7 @@ app.get("/api/download", authenticate, (req, res) => {
     return res.status(400).json({ error: "File name is required" });
   }
   const sanitizedFilename = path.basename(filename);
-  const filePath = path.join(__dirname, "public", sanitizedFilename);
+  const filePath = path.join(publicDir, sanitizedFilename);
   if (!fs.existsSync(filePath)) {
     return res.status(404).json({ error: "File not found" });
   }
@@ -313,6 +312,7 @@ setInterval(() => {
   checkExpiredSubscriptions();
 }, 60 * 60 * 1000);
 
+// HTTPS configuration
 const PORT = process.env.PORT || 3000;
 const SSL_KEY_PATH = path.join(__dirname, "key.pem");
 const SSL_CERT_PATH = path.join(__dirname, "cert.pem");
