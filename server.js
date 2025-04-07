@@ -312,10 +312,16 @@ setInterval(() => {
   checkExpiredSubscriptions();
 }, 60 * 60 * 1000);
 
-// HTTPS configuration
+// HTTPS configuration using mkcert-generated certificates for your EC2 instance
 const PORT = process.env.PORT || 3000;
-const SSL_KEY_PATH = path.join(__dirname, "key.pem");
-const SSL_CERT_PATH = path.join(__dirname, "cert.pem");
+const SSL_KEY_PATH = path.join(
+  __dirname,
+  "ec2-51-21-1-175.eu-north-1.compute.amazonaws.com-key.pem"
+);
+const SSL_CERT_PATH = path.join(
+  __dirname,
+  "ec2-51-21-1-175.eu-north-1.compute.amazonaws.com.pem"
+);
 
 const sslOptions = {
   key: fs.readFileSync(SSL_KEY_PATH),
@@ -323,6 +329,8 @@ const sslOptions = {
 };
 
 https.createServer(sslOptions, app).listen(PORT, () => {
-  console.log(`HTTPS Server running on https://localhost:${PORT}`);
+  console.log(
+    `HTTPS Server running on https://ec2-51-21-1-175.eu-north-1.compute.amazonaws.com:${PORT}`
+  );
   checkExpiredSubscriptions();
 });
