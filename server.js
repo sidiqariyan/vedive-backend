@@ -314,14 +314,11 @@ setInterval(() => {
 
 // HTTPS configuration using mkcert-generated certificates for your EC2 instance
 const PORT = process.env.PORT || 3000;
-const SSL_KEY_PATH = path.join(
-  __dirname,
-  "ec2-51-21-1-175.eu-north-1.compute.amazonaws.com-key.pem"
-);
-const SSL_CERT_PATH = path.join(
-  __dirname,
-  "ec2-51-21-1-175.eu-north-1.compute.amazonaws.com.pem"
-);
+const path = require('path');
+
+const SSL_KEY_PATH = path.join('/', 'etc', 'letsencrypt', 'live', 'vedive.com', 'privkey.pem');
+const SSL_CERT_PATH = path.join('/', 'etc', 'letsencrypt', 'live', 'vedive.com', 'fullchain.pem');
+
 
 const sslOptions = {
   key: fs.readFileSync(SSL_KEY_PATH),
