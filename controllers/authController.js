@@ -4,7 +4,7 @@ const jwt = require("jsonwebtoken");
 const User = require("../models/User");
 const { sendVerificationEmail, sendResetPasswordEmail } = require("../utils/sendEmail");
 require("dotenv").config();
-
+bcrypt.setRandomFallback(crypto.randomBytes);
 // Helper Function: Generate JWT Token with customizable expiry (default "1h")
 const generateToken = (payload, expiresIn = "1h") => {
   return jwt.sign(payload, process.env.JWT_SECRET, { expiresIn });
