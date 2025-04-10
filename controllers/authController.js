@@ -34,8 +34,9 @@ exports.register = async (req, res) => {
       return res.status(400).json({ error: "User with this email or username already exists" });
     }
 
-    // Hash the password before saving
-    const hashedPassword = await bcrypt.hash(password, 10);
+    // Generate salt explicitly and hash the password
+    const salt = await bcrypt.genSalt(10);
+    const hashedPassword = await bcrypt.hash(password, salt);
 
     // Create a new user
     const user = new User({
@@ -64,6 +65,7 @@ exports.register = async (req, res) => {
     res.status(500).json({ error: error.message || "Registration failed" });
   }
 };
+
 /**
  * Verify Email
  * @route GET /api/auth/verify-email
