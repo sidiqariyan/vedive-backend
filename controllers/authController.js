@@ -22,6 +22,12 @@ exports.register = async (req, res) => {
       return res.status(400).json({ error: "All fields are required" });
     }
 
+    // Ensure the password is a string
+    if (typeof password !== "string") {
+      console.error("Invalid password type:", password, typeof password);
+      return res.status(400).json({ error: "Password must be a string" });
+    }
+
     // Check if user already exists
     const existingUser = await User.findOne({ $or: [{ email }, { username }] });
     if (existingUser) {
@@ -47,7 +53,7 @@ exports.register = async (req, res) => {
     user.verificationToken = verificationToken;
     await user.save();
 
-    // Build the verification URL using the CLIENT_URL environment variable
+    // Build the verification URL using the FRONTEND_URL environment variable
     const verificationUrl = `${process.env.FRONTEND_URL}/verify-email?token=${verificationToken}`;
     await sendVerificationEmail(email, verificationUrl);
 
@@ -58,7 +64,6 @@ exports.register = async (req, res) => {
     res.status(500).json({ error: error.message || "Registration failed" });
   }
 };
-
 /**
  * Verify Email
  * @route GET /api/auth/verify-email
