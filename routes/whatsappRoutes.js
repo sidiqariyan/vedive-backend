@@ -4,7 +4,7 @@ const cors = require("cors");
 const path = require("path");
 const fs = require("fs");
 const { authenticate } = require("../middleware/authMiddleware");
-const { Client } = require("whatsapp-web.js");
+const { Client, MessageMedia } = require("whatsapp-web.js"); // Import MessageMedia here
 const QRCode = require("qrcode");
 const multer = require("multer");
 const { parsePhoneNumberFromString } = require("libphonenumber-js");
@@ -164,8 +164,10 @@ router.post("/send", authenticate, upload.single("media"), async (req, res) => {
       const chatId = `${phoneNumber}@c.us`;
       if (mediaFile) {
         const mediaPath = mediaFile.path;
-        await client.sendMessage(chatId, fs.readFileSync(mediaPath), { media: true });
-        await client.sendMessage(chatId, message);
+        // Create a MessageMedia instance from the file
+        const mediaData = MessageMedia.fromFilePath(mediaPath);
+        // Send media with caption (your message)
+        await client.sendMessage(chatId, mediaData, { caption: message });
       } else {
         await client.sendMessage(chatId, message);
       }
