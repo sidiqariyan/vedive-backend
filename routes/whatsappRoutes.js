@@ -50,25 +50,46 @@ const usersDb = {};
 // Helper function to initialize a WhatsApp client for a user
 function initializeClient(userId) {
   const client = new Client({
-    puppeteer: { headless: true },
+    puppeteer: {
+      headless: true,
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-dev-shm-usage',
+        '--disable-accelerated-2d-canvas',
+        '--no-first-run',
+        '--no-zygote',
+        '--single-process'
+      ]
+    },
     session: usersDb[userId]?.session || null,
   });
 
   client.on("qr", async (qr) => {
     console.log(`QR RECEIVED for user ${userId}`);
-    usersDb[userId].qrCodeData = await QRCode.toDataURL(qr);
+    try {
+      usersDb[userId].qrCodeData = await QRCode.toDataURL(qr);
+    } catch (err) {
+      console.error("Error generating QR code:", err);
+    }
   });
 
   client.on("ready", () => {
     console.log(`Client is ready for user ${userId}!`);
     usersDb[userId].isAuthenticated = true;
     usersDb[userId].qrCodeData = "";
+    // Save the session details (if needed)
     usersDb[userId].session = client.session;
   });
 
   client.on("disconnected", () => {
     console.log(`Client disconnected for user ${userId}`);
     delete usersDb[userId];
+  });
+
+  // Additional error logging to capture puppeteer/browser issues
+  client.on("error", (error) => {
+    console.error(`Client error for user ${userId}:`, error);
   });
 
   client.initialize();
