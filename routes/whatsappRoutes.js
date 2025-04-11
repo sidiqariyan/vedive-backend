@@ -52,6 +52,8 @@ function initializeClient(userId) {
   const client = new Client({
     puppeteer: {
       headless: true,
+      // Use custom executablePath if provided, otherwise fallback to bundled Chromium
+      executablePath: process.env.CHROME_PATH || undefined,
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
@@ -78,7 +80,7 @@ function initializeClient(userId) {
     console.log(`Client is ready for user ${userId}!`);
     usersDb[userId].isAuthenticated = true;
     usersDb[userId].qrCodeData = "";
-    // Save the session details (if needed)
+    // Save session details if needed
     usersDb[userId].session = client.session;
   });
 
@@ -87,12 +89,16 @@ function initializeClient(userId) {
     delete usersDb[userId];
   });
 
-  // Additional error logging to capture puppeteer/browser issues
+  // Additional error logging to capture any Puppeteer/browser issues
   client.on("error", (error) => {
     console.error(`Client error for user ${userId}:`, error);
   });
 
-  client.initialize();
+  try {
+    client.initialize();
+  } catch (initError) {
+    console.error(`Failed to initialize client for user ${userId}:`, initError);
+  }
   return client;
 }
 
