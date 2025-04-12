@@ -2,12 +2,16 @@ require("dotenv").config();
 const mongoose = require("mongoose");
 const bcrypt = require("bcryptjs");
 
+// Set a random fallback for bcryptjs if the crypto module is not detected.
+bcrypt.setRandomFallback(() => require("crypto").randomBytes(16));
+
 // Import your database connection and User model
 const connectDB = require("./db");
 const User = require("./models/User");
 
 async function seedAdmins() {
   try {
+    console.log("Attempting to connect to MongoDB...");
     await connectDB();
 
     // Define the static admin users
