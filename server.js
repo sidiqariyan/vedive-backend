@@ -326,7 +326,8 @@ const sslOptions = {
 
 https.createServer(sslOptions, app).listen(PORT, () => {
   console.log(
-    `HTTPS Server running on https://ec2-51-21-1-175.eu-north-1.compute.amazonaws.com:${PORT}`
+    `HTTPS Server running on https://vedive.com:${PORT}`
+    + "The Website is running pon port of 3000"
   );
   checkExpiredSubscriptions();
 });
