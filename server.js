@@ -128,41 +128,30 @@ async function saveToCSV(businesses) {
   }
 }
 
-// Number Scraper Endpoint (updated to accept query params or JSON body)
-app.post("/api/numberScraper", authenticate, async (req, res) => {
-  // Support data from query string or request body
-  const inputQuery = req.query.query || req.body.query;
-  const inputCampaignName = req.query.campaignName || req.body.campaignName;
-  if (!inputQuery || !inputCampaignName) {
+// Number Scraper Endpoint remains unchanged
+app.get("/api/numberScraper", authenticate, async (req, res) => {
+  const { query, campaignName } = req.query;
+  if (!query || !campaignName) {
     return res.status(400).json({ error: "Query and Campaign Name are required" });
   }
   const userId = req.user?._id;
   if (!userId) {
     return res.status(401).json({ error: "User must be authenticated" });
   }
-  // Simple sanitization
   const sanitizeInput = (input) => {
     if (typeof input !== "string") return "";
     return input.replace(/[^\w\s]/gi, "").trim().slice(0, 100);
   };
-  const sanitizedQuery = sanitizeInput(inputQuery);
-  const sanitizedCampaignName = sanitizeInput(inputCampaignName);
+  const sanitizedQuery = sanitizeInput(query);
+  const sanitizedCampaignName = sanitizeInput(campaignName);
   if (!sanitizedQuery || !sanitizedCampaignName) {
     return res.status(400).json({ error: "Invalid query or campaign name after sanitization" });
   }
   try {
     const businesses = await searchGoogleMaps(sanitizedQuery);
-    // Instead of returning a 404, return an empty array and message if no businesses found
     if (!businesses || businesses.length === 0) {
-      return res.status(200).json({
-        message: "No businesses found.",
-        campaignId: null,
-        businesses: [],
-        csvFileName: null,
-        csvDownloadUrl: null,
-      });
+      return res.status(404).json({ message: "No businesses found" });
     }
-    // Filter for valid phone numbers
     const isValidPhoneNumber = (phoneNumber) => {
       if (typeof phoneNumber !== "string") return false;
       const phoneRegex = /^[+]?[(]?[0-9]{1,4}[)]?[-\s./0-9]*$/;
@@ -172,13 +161,7 @@ app.post("/api/numberScraper", authenticate, async (req, res) => {
       .map((business) => business.phone || business.phoneNumber)
       .filter((phoneNumber) => phoneNumber && isValidPhoneNumber(phoneNumber));
     if (!phoneNumbers || phoneNumbers.length === 0) {
-      return res.status(200).json({
-        message: "No valid phone numbers found in the scraped data.",
-        campaignId: null,
-        businesses: [],
-        csvFileName: null,
-        csvDownloadUrl: null,
-      });
+      return res.status(404).json({ message: "No valid phone numbers found in the scraped data" });
     }
     const newCampaign = new Campaign({
       userId,
@@ -193,8 +176,8 @@ app.post("/api/numberScraper", authenticate, async (req, res) => {
     if (!csvFileName) {
       return res.status(500).json({ error: "Failed to save CSV file" });
     }
-    // Return a relative URL for CSV download
-    const csvDownloadUrl = `/api/download?filename=${encodeURIComponent(csvFileName)}`;
+    const baseUrl = process.env.BASE_URL || "http://localhost:3000";
+    const csvDownloadUrl = `${baseUrl}/api/download?filename=${encodeURIComponent(csvFileName)}`;
     res.status(200).json({
       message: "Number scraping completed successfully",
       campaignId: newCampaign._id,
@@ -208,7 +191,7 @@ app.post("/api/numberScraper", authenticate, async (req, res) => {
   }
 });
 
-// Secure File Download Endpoint
+// Secure File Download Endpoint remains unchanged
 app.get("/api/download", authenticate, (req, res) => {
   const { filename } = req.query;
   if (!filename) {
@@ -232,6 +215,7 @@ app.get("/api/download", authenticate, (req, res) => {
     });
   });
 });
+
 
 // Dashboard Endpoint
 app.get("/api/dashboard", authenticate, async (req, res) => {
