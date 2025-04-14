@@ -129,7 +129,7 @@ async function saveToCSV(businesses) {
 }
 
 // Number Scraper Endpoint remains unchanged
-app.get("/api/numberScraper", authenticate, async (req, res) => {
+app.post("/api/numberScraper", authenticate, async (req, res) => {
   const { query, campaignName } = req.query;
   if (!query || !campaignName) {
     return res.status(400).json({ error: "Query and Campaign Name are required" });
