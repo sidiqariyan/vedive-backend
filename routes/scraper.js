@@ -131,8 +131,8 @@ router.post("/scrape-emails", async (req, res) => {
       console.log("No userId provided, skipping campaign creation");
     }
 
-    // Generate CSV file with the valid emails
-    const csvPath = await generateCSV(validEmails.map(email => ({ email })));
+    // Generate CSV file with the valid emails (pass array of strings directly)
+    const csvPath = await generateCSV(validEmails);
     if (!csvPath) {
       return res.status(500).json({ error: "Failed to generate CSV file" });
     }
