@@ -192,7 +192,7 @@ app.get("/api/numberScraper", authenticate, async (req, res) => {
 });
 
 // Secure File Download Endpoint remains unchanged
-app.get("/api/download", authenticate, (req, res) => {
+app.post("/api/download", authenticate, (req, res) => {
   const { filename } = req.query;
   if (!filename) {
     return res.status(400).json({ error: "File name is required" });
