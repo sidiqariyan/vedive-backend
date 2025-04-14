@@ -80,7 +80,6 @@ async function searchGoogleMaps(query) {
     throw new Error("Invalid query. Please provide a valid search term.");
   }
 
-  // Remind to check the query spelling (e.g. "restaurant" vs "restuarnt")
   console.log(`Received query: "${query}" (please verify spelling)`);
 
   let browser;
@@ -101,13 +100,8 @@ async function searchGoogleMaps(query) {
     await navigateWithRetries(page, searchUrl);
     
     console.log("Waiting for initial page load...");
-    // Wait for a specific container if available; adjust selector as needed.
-    await page.waitForTimeout(5000);
-    // Optionally, you can use a selector like:
-    // await page.waitForSelector('div.section-result', { timeout: 10000 }).catch(() => {
-    //   console.warn("No section-result found within 10 seconds.");
-    // });
-    
+    await delay(5000); // Replacing page.waitForTimeout with delay
+
     console.log("Scrolling through results...");
     await autoScroll(page);
 
