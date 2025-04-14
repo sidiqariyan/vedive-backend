@@ -23,7 +23,7 @@ async function autoScroll(page) {
       await new Promise(resolve => setTimeout(resolve, 700));
       if (totalHeight >= document.body.scrollHeight) break;
     }
-  }, { timeout: 60000 }); // Set a timeout for the scroll operation
+  }, { timeout: 60000 });
 }
 
 // Retry navigation logic
@@ -39,18 +39,23 @@ async function navigateWithRetries(page, url, retries = 3) {
   }
 }
 
-// Helper function to parse business details
-function parseBusinessDetails(parent, index) {
+// Helper function to parse business details from a container element
+function parseBusinessDetails(container, index) {
   try {
-    const url = parent.find('a[href*="/maps/place/"]').attr('href');
-    const website = parent.find('a[data-value="Website"]').attr('href') || "N/A";
-    const storeName = parent.find('div.fontHeadlineSmall').text().trim() || "N/A";
-    const ratingText = parent.find('span[aria-label]').attr('aria-label') || "N/A";
-    const detailsText = parent.find('div.fontBodyMedium').first().text().split('·').map(t => t.trim());
-    const category = detailsText.length > 0 ? detailsText[0] : "N/A";
-    const address = detailsText.length > 1 ? detailsText[1] : "N/A";
-    const phone = detailsText.length > 2 ? detailsText[2] : "N/A";
-    const placeIdMatch = url?.match(/ChI[\w-]+/);
+    // Attempt to retrieve the URL of the place
+    const url = container.find('a[href*="/maps/place/"]').attr('href');
+    const website = container.find('a[data-value="Website"]').attr('href') || "N/A";
+    // Using selectors based on current Google Maps markup; adjust if necessary
+    const storeName = container.find('.fontHeadlineSmall').text().trim() || "N/A";
+    const ratingText = container.find('span[aria-label]').attr('aria-label') || "N/A";
+    // Get details (category, address, phone) from a text element
+    const detailsRaw = container.find('.fontBodyMedium').first().text();
+    const detailsText = detailsRaw ? detailsRaw.split('·').map(t => t.trim()) : [];
+    const category = detailsText[0] || "N/A";
+    const address = detailsText[1] || "N/A";
+    const phone = detailsText[2] || "N/A";
+    // Extract a unique placeId from the URL if available
+    const placeIdMatch = url && url.match(/ChI[\w-]+/);
     const placeId = placeIdMatch ? placeIdMatch[0] : "N/A";
 
     console.log(`Parsed business #${index + 1}:`, { storeName, placeId, address, category, phone });
@@ -81,17 +86,20 @@ async function searchGoogleMaps(query) {
   let browser;
   try {
     browser = await puppeteer.launch({
-      headless: process.env.HEADLESS !== "false", // Set to false for debugging
+      headless: process.env.HEADLESS !== "false", // set to false for debugging if needed
       args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-gpu"],
     });
 
     const page = await browser.newPage();
     
-    // Set a user agent to avoid detection
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
+    // Set a common user agent string
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) ' +
+      'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
     
+    // Encode the query for use in the URL
+    const searchUrl = `https://www.google.com/maps/search/${encodeURIComponent(query)}`;
     console.log(`Navigating to Google Maps with query: ${query}`);
-    await navigateWithRetries(page, `https://www.google.com/maps/search/${query.split(" ").join("+")}`);
+    await navigateWithRetries(page, searchUrl);
     
     console.log("Waiting for initial page load...");
     await delay(5000); // Wait for content to load
@@ -105,10 +113,22 @@ async function searchGoogleMaps(query) {
     const businesses = [];
 
     console.log("Parsing business data...");
-    $('a[href*="/maps/place/"]').each((i, el) => {
-      const business = parseBusinessDetails($(el).parent(), i);
+    // Primary approach: look for containers that represent each business result
+    $('div.section-result').each((i, el) => {
+      const container = $(el);
+      const business = parseBusinessDetails(container, i);
       if (business) businesses.push(business);
     });
+
+    // Fallback approach if no results were found with the primary selector
+    if (businesses.length === 0) {
+      console.warn("No results found using primary selector; using fallback selector.");
+      $('a[href*="/maps/place/"]').each((i, el) => {
+        const container = $(el).closest('div');
+        const business = parseBusinessDetails(container, i);
+        if (business) businesses.push(business);
+      });
+    }
 
     // Remove duplicates based on placeId
     const uniqueBusinesses = Array.from(
@@ -117,17 +137,17 @@ async function searchGoogleMaps(query) {
 
     console.log(`Found ${uniqueBusinesses.length} unique businesses`);
 
-    // Sort businesses by rating
+    // Sort businesses by rating (highest first)
     uniqueBusinesses.sort((a, b) => {
-      const ratingA = parseFloat(a.ratingText?.replace(/[^0-9.]/g, "")) || 0;
-      const ratingB = parseFloat(b.ratingText?.replace(/[^0-9.]/g, "")) || 0;
+      const ratingA = parseFloat(a.ratingText.replace(/[^0-9.]/g, "")) || 0;
+      const ratingB = parseFloat(b.ratingText.replace(/[^0-9.]/g, "")) || 0;
       return ratingB - ratingA;
     });
 
     console.log(`Scraped ${uniqueBusinesses.length} businesses successfully.`);
     return uniqueBusinesses;
   } catch (error) {
-    console.error('Error while scraping Google Maps:', error.message);
+    console.error("Error while scraping Google Maps:", error.message);
     return [];
   } finally {
     if (browser) {
