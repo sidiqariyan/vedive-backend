@@ -42,19 +42,16 @@ async function navigateWithRetries(page, url, retries = 3) {
 // Helper function to parse business details from a container element
 function parseBusinessDetails(container, index) {
   try {
-    // Attempt to retrieve the URL of the place
     const url = container.find('a[href*="/maps/place/"]').attr('href');
     const website = container.find('a[data-value="Website"]').attr('href') || "N/A";
-    // Using selectors based on current Google Maps markup; adjust if necessary
+    // Adjust these selectors based on the actual Google Maps markup
     const storeName = container.find('.fontHeadlineSmall').text().trim() || "N/A";
     const ratingText = container.find('span[aria-label]').attr('aria-label') || "N/A";
-    // Get details (category, address, phone) from a text element
     const detailsRaw = container.find('.fontBodyMedium').first().text();
     const detailsText = detailsRaw ? detailsRaw.split('·').map(t => t.trim()) : [];
     const category = detailsText[0] || "N/A";
     const address = detailsText[1] || "N/A";
     const phone = detailsText[2] || "N/A";
-    // Extract a unique placeId from the URL if available
     const placeIdMatch = url && url.match(/ChI[\w-]+/);
     const placeId = placeIdMatch ? placeIdMatch[0] : "N/A";
 
@@ -83,6 +80,9 @@ async function searchGoogleMaps(query) {
     throw new Error("Invalid query. Please provide a valid search term.");
   }
 
+  // Remind to check the query spelling (e.g. "restaurant" vs "restuarnt")
+  console.log(`Received query: "${query}" (please verify spelling)`);
+
   let browser;
   try {
     browser = await puppeteer.launch({
@@ -96,31 +96,38 @@ async function searchGoogleMaps(query) {
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) ' +
       'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
     
-    // Encode the query for use in the URL
     const searchUrl = `https://www.google.com/maps/search/${encodeURIComponent(query)}`;
     console.log(`Navigating to Google Maps with query: ${query}`);
     await navigateWithRetries(page, searchUrl);
     
     console.log("Waiting for initial page load...");
-    await delay(5000); // Wait for content to load
+    // Wait for a specific container if available; adjust selector as needed.
+    await page.waitForTimeout(5000);
+    // Optionally, you can use a selector like:
+    // await page.waitForSelector('div.section-result', { timeout: 10000 }).catch(() => {
+    //   console.warn("No section-result found within 10 seconds.");
+    // });
     
     console.log("Scrolling through results...");
     await autoScroll(page);
 
     console.log("Extracting page content...");
     const html = await page.content();
+
+    // Optional: log a snippet of HTML to debug
+    // console.log("HTML snippet:", html.substring(0, 500));
+
     const $ = cheerio.load(html);
     const businesses = [];
 
     console.log("Parsing business data...");
-    // Primary approach: look for containers that represent each business result
+    // Primary approach: try using a dedicated container if available.
     $('div.section-result').each((i, el) => {
       const container = $(el);
       const business = parseBusinessDetails(container, i);
       if (business) businesses.push(business);
     });
 
-    // Fallback approach if no results were found with the primary selector
     if (businesses.length === 0) {
       console.warn("No results found using primary selector; using fallback selector.");
       $('a[href*="/maps/place/"]').each((i, el) => {
