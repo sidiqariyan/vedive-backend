@@ -2,12 +2,21 @@ const axios = require("axios");
 const { secret_key, app_id } = require("../config/secret");
 const Subscription = require("../models/SubscriptionPlan");
 
-// Create Subscription Order remains largely the same
+// Optional safeguard: map plan IDs to prices
+const planPrices = {
+  starter: 49,
+  business: 199,
+  enterprise: 699,
+};
+
 const createSubscriptionOrder = async (req, res) => {
   try {
     const { planId, email, phone, name, amount } = req.body;
     const orderId = "ORID" + Date.now();
     const customerId = "CID" + Date.now();
+
+    // Use the provided amount or fallback to the mapped price
+    const orderAmount = amount || planPrices[planId] || 1;
 
     const options = {
       method: "POST",
@@ -30,7 +39,7 @@ const createSubscriptionOrder = async (req, res) => {
           notify_url: process.env.CASHFREE_NOTIFY_URL || "https://your-notify-url.com",
           payment_methods: "cc,dc,upi"
         },
-        order_amount: amount || 1,
+        order_amount: orderAmount,
         order_id: orderId,
         order_currency: "INR",
         order_note: `Subscription order for plan ${planId}`
@@ -52,16 +61,13 @@ const createSubscriptionOrder = async (req, res) => {
     });
   }
 };
+
 const verifyPayment = async (req, res) => {
   const orderid = req.params.orderid;
-  // Extract the order_token from query parameters (if provided)
   const orderToken = req.query.order_token;
-  // For demonstration, assume the client passes the userId and planId in the query parameters.
-  // In a real app, these would come from your auth middleware (e.g., req.user).
   const userId = req.query.userId || "user123";
   const planId = req.query.planId || "starter";
 
-  // Determine the subscription duration based on the plan.
   let planDuration = 0;
   switch (planId) {
     case "starter":
@@ -79,7 +85,6 @@ const verifyPayment = async (req, res) => {
   }
 
   try {
-    // Build the Cashfree API URL; include the order token if provided.
     let url = `https://sandbox.cashfree.com/pg/orders/${orderid}`;
     if (orderToken) {
       url += `?order_token=${orderToken}`;
@@ -96,13 +101,10 @@ const verifyPayment = async (req, res) => {
     };
 
     const response = await axios.request(options);
-    // Log response for debugging (remove in production)
     console.log("Cashfree response data:", response.data);
     const orderStatus = response.data.order_status;
 
-    // Consider both "PAID" and "SUCCESS" as a successful payment.
     if (orderStatus === "PAID" || orderStatus === "SUCCESS") {
-      // Update or create the subscription record.
       let sub = await Subscription.findOne({ userId });
       if (!sub) {
         sub = new Subscription({
@@ -142,15 +144,11 @@ const verifyPayment = async (req, res) => {
   }
 };
 
-
 const getSubscriptionStatus = async (req, res) => {
-  // For demonstration, assume the userId is passed as a query parameter.
   const userId = req.query.userId || "user123";
   let subscription = await Subscription.findOne({ userId });
   if (subscription) {
-    // Check if the subscription has expired.
     if (subscription.endDate && new Date() > subscription.endDate) {
-      // Subscription has expired. Downgrade the user to the free plan.
       subscription.plan = "free";
       subscription.startDate = new Date();
       subscription.endDate = null;
