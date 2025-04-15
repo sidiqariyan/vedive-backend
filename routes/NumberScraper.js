@@ -22,16 +22,14 @@ function logTime(message) {
 async function searchGoogleMaps(query) {
   logTime(`Starting search for: "${query}"`);
 
-  // Validate input
   if (!query || typeof query !== "string" || query.trim() === "") {
     throw new Error("Invalid query. Please provide a valid search term.");
   }
 
   let browser;
   try {
-    // Launch options with custom configurations
     const launchOptions = {
-      headless: 'new', // using new headless mode for better compatibility
+      headless: 'new', // or use `true` if 'new' causes issues
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
@@ -40,17 +38,16 @@ async function searchGoogleMaps(query) {
         '--disable-site-isolation-trials',
         '--window-size=1920,1080'
       ],
+      // Uncomment to use a specific chromium binary, e.g., '/usr/bin/chromium-browser'
+      // executablePath: '/path/to/chromium-browser',
       ignoreHTTPSErrors: true,
       defaultViewport: null
     };
 
     logTime("Launching browser");
     browser = await puppeteer.launch(launchOptions);
-
-    // For debugging purposes, log available methods
     console.log("Browser methods available:", Object.keys(browser));
 
-    // Conditionally create an incognito browser context if supported; otherwise, use default
     let page;
     if (typeof browser.createIncognitoBrowserContext === "function") {
       logTime("Creating incognito browser context");
@@ -61,14 +58,12 @@ async function searchGoogleMaps(query) {
       page = await browser.newPage();
     }
 
-    // Set a convincing user agent and additional headers
     await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36");
     await page.setExtraHTTPHeaders({
       "Accept-Language": "en-US,en;q=0.9",
       Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"
     });
 
-    // Enable console logging from within the browser context
     page.on("console", (msg) => console.log(`Browser console: ${msg.text()}`));
     page.on("response", (response) => {
       const status = response.status();
@@ -77,11 +72,9 @@ async function searchGoogleMaps(query) {
       }
     });
 
-    // Construct the search URL for Google Maps
     const searchUrl = `https://www.google.com/maps/search/${encodeURIComponent(query)}`;
     logTime(`Navigating to ${searchUrl}`);
 
-    // Retry navigation up to three times
     let navigationSuccess = false;
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
@@ -102,7 +95,6 @@ async function searchGoogleMaps(query) {
       throw new Error("Failed to navigate to Google Maps after multiple attempts");
     }
 
-    // Handle consent dialogs if they appear
     logTime("Checking for consent dialogs");
     try {
       const consentSelectors = [
@@ -123,10 +115,8 @@ async function searchGoogleMaps(query) {
       }
     } catch (error) {
       logTime(`Error handling consent: ${error.message}`);
-      // Continue even if consent handling fails
     }
 
-    // Wait for search results to load
     logTime("Waiting for search results to load");
     try {
       await Promise.race([
@@ -139,25 +129,20 @@ async function searchGoogleMaps(query) {
       logTime(`Timeout waiting for results: ${error.message}`);
     }
 
-    // Scroll to load more results
     logTime("Scrolling to load more results");
     await autoScroll(page);
 
-    // Get page content for parsing
     const html = await page.content();
 
-    // Extract business information using helper functions
     logTime("Extracting business details");
     const businesses = await extractBusinessInformation(page, html);
 
-    // If few results were found, try an alternative extraction method
     if (businesses.length < 3) {
       logTime("Found few results, trying alternative extraction");
       const altBusinesses = await alternativeExtraction(page, query);
       businesses.push(...altBusinesses);
     }
 
-    // Remove duplicates
     const uniqueBusinesses = removeDuplicates(businesses);
     logTime(`Found ${uniqueBusinesses.length} unique businesses`);
     return uniqueBusinesses;
@@ -172,7 +157,6 @@ async function searchGoogleMaps(query) {
     }
   }
 }
-
 // Function to auto-scroll the page
 async function autoScroll(page) {
   return await page.evaluate(async () => {
