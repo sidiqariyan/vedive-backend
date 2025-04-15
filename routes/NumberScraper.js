@@ -45,7 +45,7 @@ async function extractBusinessInformation(page, html) {
   const businesses = [];
   const $ = cheerio.load(html);
   
-  // Try to find business containers by looking for articles
+  // Look for business containers (adjust selectors as needed)
   $('div[role="article"]').each((i, elem) => {
     const storeName = $(elem).find('div.fontHeadlineSmall').text().trim();
     if (storeName) {
@@ -69,14 +69,17 @@ async function extractBusinessInformation(page, html) {
 async function alternativeExtraction(page, query) {
   try {
     logTime("Trying alternative extraction via Google Search");
-    await page.goto(`https://www.google.com/search?q=${encodeURIComponent(query)}+business+phone+number`, {
-      waitUntil: 'networkidle2'
-    });
+    await page.goto(
+      `https://www.google.com/search?q=${encodeURIComponent(query)}+business+phone+number`,
+      { waitUntil: 'networkidle2' }
+    );
     await delay(3000);
     return await page.evaluate(() => {
       const businesses = [];
       // Select business cards using common selectors
-      const businessCards = Array.from(document.querySelectorAll('div.vwVdIc, div.VkpGBb, div[data-hveid]'));
+      const businessCards = Array.from(
+        document.querySelectorAll('div.vwVdIc, div.VkpGBb, div[data-hveid]')
+      );
       businessCards.forEach((card, index) => {
         try {
           const nameEl = card.querySelector('h3, div[role="heading"]');
@@ -85,15 +88,19 @@ async function alternativeExtraction(page, query) {
           if (!name) return;
           let phone = 'N/A';
           let address = 'N/A';
-          const allText = Array.from(card.querySelectorAll('div, span'))
-                              .map(el => el.textContent.trim())
-                              .filter(text => text.length > 0);
+          const allText = Array.from(
+            card.querySelectorAll('div, span')
+          )
+            .map(el => el.textContent.trim())
+            .filter(text => text.length > 0);
+          // Find a phone number
           for (const text of allText) {
             if (/^[\+]?[(]?[0-9]{3}[)]?[-\s\.]?[0-9]{3}[-\s\.]?[0-9]{4,6}$/.test(text.replace(/\s/g, ''))) {
               phone = text;
               break;
             }
           }
+          // Find address if possible
           for (const text of allText) {
             if (text.includes(',') && text.length > 10 && !text.includes(name)) {
               address = text;
@@ -105,9 +112,9 @@ async function alternativeExtraction(page, query) {
               index: index + 1,
               storeName: name,
               placeId: 'N/A',
-              address: address,
+              address,
               category: 'N/A',
-              phone: phone,
+              phone,
               googleUrl: 'N/A',
               bizWebsite: 'N/A',
               ratingText: 'N/A'
@@ -182,7 +189,7 @@ async function searchGoogleMaps(query) {
       Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"
     });
 
-    // Log browser messages and response statuses
+    // Log browser console messages and response statuses
     page.on("console", (msg) => console.log(`Browser console: ${msg.text()}`));
     page.on("response", (response) => {
       const status = response.status();
