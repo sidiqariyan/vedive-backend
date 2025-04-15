@@ -23,7 +23,7 @@ async function autoScroll(page) {
       while (totalHeight < document.body.scrollHeight) {
         window.scrollBy(0, distance);
         totalHeight += distance;
-        // Random delay between 300 and 800 ms for a more human-like scroll behavior
+        // Random delay between 300 and 800ms for human-like scrolling
         await new Promise(resolve => setTimeout(resolve, Math.floor(Math.random() * 500) + 300));
       }
     });
@@ -45,7 +45,7 @@ async function navigateWithRetries(page, url, maxRetries = 3) {
       const pageContent = await page.content();
       if (pageContent.includes('captcha') || pageContent.includes('unusual traffic')) {
         console.warn('Captcha or unusual traffic detected');
-        if (attempt === maxRetries - 1) throw new Error('Blocked by Google captcha');
+        if (attempt === maxRetries - 1) throw new Error('Blocked by Bing captcha');
       } else {
         console.log('Navigation successful');
         return;
@@ -53,7 +53,7 @@ async function navigateWithRetries(page, url, maxRetries = 3) {
     } catch (error) {
       console.warn(`Navigation attempt ${attempt + 1} failed: ${error.message}`);
       if (attempt === maxRetries - 1) throw error;
-      // Increase backoff time with randomness (e.g., between 1500 and 3000ms multiplied by exponential factor)
+      // Exponential backoff with randomness
       const backoffTime = Math.pow(2, attempt) * (1500 + Math.floor(Math.random() * 1500));
       console.log(`Backing off for ${backoffTime}ms before retrying...`);
       await delay(backoffTime);
@@ -61,20 +61,20 @@ async function navigateWithRetries(page, url, maxRetries = 3) {
   }
 }
 
-// Extract search results from the Google search page
+// Extract search results from the Bing search page
 async function extractSearchResults(page) {
   console.log('Extracting search results...');
-  // Wait for the search results container to load
-  await page.waitForSelector('div#search', { timeout: 10000 });
+  // Wait for the Bing results container to load
+  await page.waitForSelector('ol#b_results', { timeout: 10000 });
   const results = await page.evaluate(() => {
     const extractedResults = [];
-    // Google search results are typically in divs with class "g"
-    const items = document.querySelectorAll('div.g');
+    // Bing search results are typically in list items with class "b_algo"
+    const items = document.querySelectorAll('li.b_algo');
     items.forEach((item, index) => {
       try {
-        const titleElement = item.querySelector('h3');
+        const titleElement = item.querySelector('h2');
         const linkElement = item.querySelector('a');
-        const snippetElement = item.querySelector('.VwiC3b');
+        const snippetElement = item.querySelector('p');
         if (titleElement && linkElement) {
           extractedResults.push({
             index: index + 1,
@@ -84,7 +84,7 @@ async function extractSearchResults(page) {
           });
         }
       } catch (error) {
-        console.error(`Error parsing search result at index ${index}:`, error);
+        console.error(`Error parsing Bing result at index ${index}:`, error);
       }
     });
     return extractedResults;
@@ -93,9 +93,9 @@ async function extractSearchResults(page) {
   return results;
 }
 
-// Main function to search Google using the custom query
+// Main function to search Bing using the custom query
 async function searchGoogle(query) {
-  console.log(`Starting Google search for: "${query}"`);
+  console.log(`Starting Bing search for: "${query}"`);
   if (!query || typeof query !== "string" || query.trim() === "") {
     throw new Error("Invalid query. Please provide a valid search term.");
   }
@@ -106,7 +106,6 @@ async function searchGoogle(query) {
     browser = await puppeteer.launch({
       headless: true,
       args: [
-        // Optionally, add proxy arguments here if needed: '--proxy-server=YOUR_PROXY'
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-gpu',
@@ -116,7 +115,7 @@ async function searchGoogle(query) {
     });
     
     const page = await browser.newPage();
-    // Optionally set a rotating or random user agent here
+    // Optionally use a rotating or random user agent here
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.102 Safari/537.36');
     await page.setViewport({ width: 1920, height: 1080 });
     
@@ -131,9 +130,9 @@ async function searchGoogle(query) {
       }
     });
     
-    // Use the provided query to search Google
+    // Use the provided query to search Bing
     const searchQuery = encodeURIComponent(query);
-    const url = `https://www.bing.com/search?pglt=${searchQuery}`;
+    const url = `https://www.bing.com/search?q=${searchQuery}`;
     await navigateWithRetries(page, url);
     
     // Give time for results to load
@@ -159,7 +158,7 @@ async function searchGoogle(query) {
     const results = await extractSearchResults(page);
     return results;
   } catch (error) {
-    console.error('Error while scraping Google:', error);
+    console.error('Error while scraping Bing:', error);
     throw error;
   } finally {
     if (browser) {
@@ -229,7 +228,7 @@ async function handleSearchScraper(req, res) {
       return res.status(400).json({ error: "Invalid query or campaign name after sanitization" });
     }
     
-    // Scrape Google for search results
+    // Scrape Bing for search results using the sanitized query
     const results = await searchGoogle(sanitizedQuery);
     if (!results || results.length === 0) {
       return res.status(404).json({ message: "No search results found" });
