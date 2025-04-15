@@ -102,7 +102,7 @@ async function extractBusinessDetails(page) {
   console.log('Extracting business details...');
   
   // First attempt: Try with direct DOM queries for business listings
-  await page.waitForTimeout(2000); // Give the page a moment to stabilize
+  await delay(2000); // Replaced page.waitForTimeout with delay
   
   // Method 1: Use page.evaluate to extract via DOM
   const businessesMethod1 = await page.evaluate(() => {
