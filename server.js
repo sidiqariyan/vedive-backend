@@ -3,6 +3,7 @@ const express = require("express");
 const fs = require("fs");
 const path = require("path");
 const https = require("https");
+const http = require("http"); // require http module for fallback
 const { v4: uuidv4 } = require("uuid");
 const createCsvWriter = require("csv-writer").createObjectCsvWriter;
 const cors = require("cors");
@@ -42,7 +43,7 @@ app.use(
 app.use(express.json({ limit: "1mb" }));
 app.use(express.static(publicDir));
 
-// Logging Middleware
+// Logging Middleware (custom)
 app.use((req, res, next) => {
   const isAuthPath = req.originalUrl.includes("/api/auth");
   let logUrl = req.originalUrl;
@@ -127,61 +128,40 @@ async function saveToCSV(businesses) {
     return null;
   }
 }
-
 app.post("/api/numberScraper", authenticate, async (req, res) => {
-  // Read parameters from the request body
-  const { query, campaignName } = req.body;
-
-  // Ensure required fields are provided
+  const { query, campaignName } = req.body; // Changed from req.query to req.body
   if (!query || !campaignName) {
     return res.status(400).json({ error: "Query and Campaign Name are required" });
   }
-
-  // Check if user is authenticated and has a valid user ID
   const userId = req.user?._id;
   if (!userId) {
     return res.status(401).json({ error: "User must be authenticated" });
   }
-
-  // Utility function to sanitize input
   const sanitizeInput = (input) => {
     if (typeof input !== "string") return "";
-    // Remove any non-alphanumeric (and non-space) characters and limit to 100 characters
     return input.replace(/[^\w\s]/gi, "").trim().slice(0, 100);
   };
-
-  // Sanitize both the query and campaign name
   const sanitizedQuery = sanitizeInput(query);
   const sanitizedCampaignName = sanitizeInput(campaignName);
   if (!sanitizedQuery || !sanitizedCampaignName) {
     return res.status(400).json({ error: "Invalid query or campaign name after sanitization" });
   }
-
   try {
-    // Call the scraping function with the sanitized query
     const businesses = await searchGoogleMaps(sanitizedQuery);
-
     if (!businesses || businesses.length === 0) {
       return res.status(404).json({ message: "No businesses found" });
     }
-
-    // Validate phone numbers using a simple regex test
     const isValidPhoneNumber = (phoneNumber) => {
       if (typeof phoneNumber !== "string") return false;
       const phoneRegex = /^[+]?[(]?[0-9]{1,4}[)]?[-\s./0-9]*$/;
       return phoneRegex.test(phoneNumber);
     };
-
-    // Extract valid phone numbers from the scraped businesses data
     const phoneNumbers = businesses
       .map((business) => business.phone || business.phoneNumber)
       .filter((phoneNumber) => phoneNumber && isValidPhoneNumber(phoneNumber));
-
     if (!phoneNumbers || phoneNumbers.length === 0) {
       return res.status(404).json({ message: "No valid phone numbers found in the scraped data" });
     }
-
-    // Create a new campaign record with the scraped data
     const newCampaign = new Campaign({
       userId,
       campaignName: sanitizedCampaignName,
@@ -191,18 +171,12 @@ app.post("/api/numberScraper", authenticate, async (req, res) => {
       status: "completed",
     });
     await newCampaign.save();
-
-    // Save the complete businesses data to a CSV file
     const csvFileName = await saveToCSV(businesses);
     if (!csvFileName) {
       return res.status(500).json({ error: "Failed to save CSV file" });
     }
-
-    // Build the download URL for the CSV file using the BASE_URL from environment variables
-    const baseUrl = process.env.BASE_URL || "http://localhost:3000";
-    const csvDownloadUrl = `${baseUrl}/api/download?filename=${encodeURIComponent(csvFileName)}`;
-
-    // Return a successful response with all relevant information
+    
+    const csvDownloadUrl = `/api/download?filename=${encodeURIComponent(csvFileName)}`;
     res.status(200).json({
       message: "Number scraping completed successfully",
       campaignId: newCampaign._id,
@@ -215,8 +189,16 @@ app.post("/api/numberScraper", authenticate, async (req, res) => {
     res.status(500).json({ error: "An error occurred while scraping numbers" });
   }
 });
-// Secure File Download Endpoint remains unchanged
-app.post("/api/download", authenticate, (req, res) => {
+
+// Keep the GET endpoint for backward compatibility, redirecting to POST
+app.get("/api/numberScraper", authenticate, (req, res) => {
+  res.status(400).json({ 
+    error: "Method not allowed. Please use POST instead of GET for this endpoint.",
+    code: "METHOD_NOT_ALLOWED"
+  });
+});
+// Secure File Download Endpoint
+app.get("/api/download", authenticate, (req, res) => {
   const { filename } = req.query;
   if (!filename) {
     return res.status(400).json({ error: "File name is required" });
@@ -239,7 +221,6 @@ app.post("/api/download", authenticate, (req, res) => {
     });
   });
 });
-
 
 // Dashboard Endpoint
 app.get("/api/dashboard", authenticate, async (req, res) => {
@@ -336,19 +317,25 @@ setInterval(() => {
   checkExpiredSubscriptions();
 }, 60 * 60 * 1000);
 
-// HTTPS configuration using certificates
+// HTTPS configuration using mkcert-generated certificates or fallback to HTTP if not available
 const PORT = process.env.PORT || 3000;
-const SSL_KEY_PATH = path.join('/', 'etc', 'letsencrypt', 'live', 'vedive.com', 'privkey.pem');
-const SSL_CERT_PATH = path.join('/', 'etc', 'letsencrypt', 'live', 'vedive.com', 'fullchain.pem');
+const SSL_KEY_PATH = path.join("/", "etc", "letsencrypt", "live", "vedive.com", "privkey.pem");
+const SSL_CERT_PATH = path.join("/", "etc", "letsencrypt", "live", "vedive.com", "fullchain.pem");
 
-const sslOptions = {
-  key: fs.readFileSync(SSL_KEY_PATH),
-  cert: fs.readFileSync(SSL_CERT_PATH),
-};
+if (fs.existsSync(SSL_KEY_PATH) && fs.existsSync(SSL_CERT_PATH)) {
+  const sslOptions = {
+    key: fs.readFileSync(SSL_KEY_PATH),
+    cert: fs.readFileSync(SSL_CERT_PATH),
+  };
 
-https.createServer(sslOptions, app).listen(PORT, () => {
-  console.log(
-    `HTTPS Server running on https://vedive.com:${PORT} - The Website is running on port ${PORT}`
-  );
-  checkExpiredSubscriptions();
-});
+  https.createServer(sslOptions, app).listen(PORT, () => {
+    console.log(`HTTPS Server running on https://vedive.com:${PORT}`);
+    checkExpiredSubscriptions();
+  });
+} else {
+  console.warn("SSL certificate files not found. Starting server in HTTP mode.");
+  http.createServer(app).listen(PORT, () => {
+    console.log(`HTTP Server running on port ${PORT}`);
+    checkExpiredSubscriptions();
+  });
+}
