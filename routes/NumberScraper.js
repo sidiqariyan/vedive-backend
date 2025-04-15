@@ -8,7 +8,7 @@ const { v4: uuidv4 } = require('uuid');
 // Initialize puppeteer with stealth plugin
 puppeteer.use(stealthPlugin());
 
-// Utility function to add delays
+// Utility function to add delays with randomness
 function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
@@ -23,7 +23,8 @@ async function autoScroll(page) {
       while (totalHeight < document.body.scrollHeight) {
         window.scrollBy(0, distance);
         totalHeight += distance;
-        await new Promise(resolve => setTimeout(resolve, 500));
+        // Random delay between 300 and 800 ms for a more human-like scroll behavior
+        await new Promise(resolve => setTimeout(resolve, Math.floor(Math.random() * 500) + 300));
       }
     });
     console.log('Auto-scroll complete');
@@ -52,7 +53,8 @@ async function navigateWithRetries(page, url, maxRetries = 3) {
     } catch (error) {
       console.warn(`Navigation attempt ${attempt + 1} failed: ${error.message}`);
       if (attempt === maxRetries - 1) throw error;
-      const backoffTime = Math.pow(2, attempt) * 1000 + Math.floor(Math.random() * 1000);
+      // Increase backoff time with randomness (e.g., between 1500 and 3000ms multiplied by exponential factor)
+      const backoffTime = Math.pow(2, attempt) * (1500 + Math.floor(Math.random() * 1500));
       console.log(`Backing off for ${backoffTime}ms before retrying...`);
       await delay(backoffTime);
     }
@@ -104,6 +106,7 @@ async function searchGoogle(query) {
     browser = await puppeteer.launch({
       headless: true,
       args: [
+        // Optionally, add proxy arguments here if needed: '--proxy-server=YOUR_PROXY'
         '--no-sandbox',
         '--disable-setuid-sandbox',
         '--disable-gpu',
@@ -113,6 +116,7 @@ async function searchGoogle(query) {
     });
     
     const page = await browser.newPage();
+    // Optionally set a rotating or random user agent here
     await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/98.0.4758.102 Safari/537.36');
     await page.setViewport({ width: 1920, height: 1080 });
     
