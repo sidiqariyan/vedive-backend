@@ -133,7 +133,7 @@ async function searchGoogle(query) {
     
     // Use the provided query to search Google
     const searchQuery = encodeURIComponent(query);
-    const url = `https://www.google.com/search?q=${searchQuery}`;
+    const url = `https://www.bing.com/search?pglt=${searchQuery}`;
     await navigateWithRetries(page, url);
     
     // Give time for results to load
