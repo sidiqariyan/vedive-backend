@@ -182,160 +182,152 @@ async function autoScroll(page) {
 }
 
 // Extract business information using multiple methods
-async function extractBusinessInformation(page, html) {
-  const businesses = [];
-  const $ = cheerio.load(html);
-  
-  // Try multiple selector patterns
-  logTime("Using method 1: Direct article selector");
-  extractWithSelector($, 'div[role="article"]', businesses);
-  
-  logTime("Using method 2: Place link selector");
-  extractWithSelector($, 'a[href*="/maps/place/"]', businesses);
-  
-  logTime("Using method 3: Headline selector");
-  extractWithSelector($, 'div.fontHeadlineSmall', businesses);
-  
-  // If we still don't have results, try JavaScript evaluation in the page
-  if (businesses.length === 0) {
-    logTime("Using method 4: In-page JavaScript evaluation");
-    const jsResults = await page.evaluate(() => {
-      const results = [];
-      
-      // Try to find all possible business containers
-      const containers = Array.from(document.querySelectorAll('div[jsaction*="mouseover"], div[jsaction*="click"], a[href*="/maps/place/"]'));
-      
-      containers.forEach((container, index) => {
-        try {
-          // Try to extract business name
-          const nameElement = container.querySelector('div.fontHeadlineSmall, h3, div[role="heading"]');
-          if (!nameElement) return;
-          
-          const name = nameElement.textContent.trim();
-          if (!name) return;
-          
-          // Extract URL if available
-          let url = '';
-          const link = container.tagName === 'A' ? container : container.querySelector('a[href*="/maps/place/"]');
-          if (link) url = link.href;
-          
-          // Try to extract phone number
-          let phone = 'N/A';
-          const allTextElements = Array.from(container.querySelectorAll('div, span'));
-          for (const el of allTextElements) {
-            const text = el.textContent.trim();
-            if (/^[\+]?[(]?[0-9]{3}[)]?[-\s\.]?[0-9]{3}[-\s\.]?[0-9]{4,6}$/.test(text.replace(/\s/g, ''))) {
-              phone = text;
-              break;
-            }
-          }
-          
-          // Extract address (any text with commas)
-          let address = 'N/A';
-          for (const el of allTextElements) {
-            const text = el.textContent.trim();
-            if (text.includes(',') && text.length > 10) {
-              address = text;
-              break;
-            }
-          }
-          
-          results.push({
-            index: index + 1,
-            storeName: name,
-            placeId: url.match(/place\/[^\/]+\/([^\/\?]+)/) ? url.match(/place\/[^\/]+\/([^\/\?]+)/)[1] : 'N/A',
-            address: address,
-            category: 'N/A', // Hard to determine reliably
-            phone: phone,
-            googleUrl: url,
-            bizWebsite: 'N/A',
-            ratingText: 'N/A'
-          });
-        } catch (e) {
-          console.error(`Error parsing item ${index}:`, e.message);
-        }
-      });
-      
-      return results;
-    });
-    
-    businesses.push(...jsResults);
+async function searchGoogleMaps(query) {
+  logTime(`Starting search for: "${query}"`);
+
+  if (!query || typeof query !== "string" || query.trim() === "") {
+    throw new Error("Invalid query. Please provide a valid search term.");
   }
-  
-  return businesses;
+
+  let browser;
+  try {
+    const launchOptions = {
+      headless: 'new', // or try `true` if 'new' mode causes issues
+      args: [
+        '--no-sandbox',
+        '--disable-setuid-sandbox',
+        '--disable-web-security',
+        '--disable-features=IsolateOrigins',
+        '--disable-site-isolation-trials',
+        '--window-size=1920,1080'
+      ],
+      // If needed, specify executablePath for Chromium on Ubuntu:
+      // executablePath: '/usr/bin/chromium-browser',
+      ignoreHTTPSErrors: true,
+      defaultViewport: null
+    };
+
+    logTime("Launching browser");
+    browser = await puppeteer.launch(launchOptions);
+    console.log("Browser methods available:", Object.keys(browser));
+
+    // Create page (incognito not available on EC2 in your case)
+    let page;
+    if (typeof browser.createIncognitoBrowserContext === "function") {
+      logTime("Creating incognito browser context");
+      const context = await browser.createIncognitoBrowserContext();
+      page = await context.newPage();
+    } else {
+      console.warn("Incognito mode not supported. Using default page context.");
+      page = await browser.newPage();
+    }
+
+    // Set user agent and headers
+    await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36");
+    await page.setExtraHTTPHeaders({
+      "Accept-Language": "en-US,en;q=0.9",
+      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"
+    });
+
+    // Enable browser console logging
+    page.on("console", (msg) => console.log(`Browser console: ${msg.text()}`));
+    page.on("response", (response) => {
+      const status = response.status();
+      if (status >= 300) {
+        console.log(`Response ${status} for URL: ${response.url()}`);
+      }
+    });
+
+    // Build the search URL for Google Maps
+    const searchUrl = `https://www.google.com/maps/search/${encodeURIComponent(query)}`;
+    logTime(`Navigating to ${searchUrl}`);
+
+    // Retry navigation up to three times with delays (random delays can help)
+    let navigationSuccess = false;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        await page.goto(searchUrl, {
+          waitUntil: "networkidle2",
+          timeout: 60000
+        });
+        navigationSuccess = true;
+        logTime(`Navigation successful on attempt ${attempt}`);
+        break;
+      } catch (error) {
+        logTime(`Navigation attempt ${attempt} failed: ${error.message}`);
+        if (attempt === 3) throw error;
+        await delay(3000 + Math.floor(Math.random() * 2000)); // random delay
+      }
+    }
+    if (!navigationSuccess) {
+      throw new Error("Failed to navigate to Google Maps after multiple attempts");
+    }
+
+    // Handle consent dialogs with safer method:
+    logTime("Checking for consent dialogs");
+    try {
+      // Instead of using invalid :contains selector, find buttons by iterating over all buttons
+      const consentButtonSelector = 'button';
+      const buttons = await page.$$(consentButtonSelector);
+      for (const btn of buttons) {
+        const btnText = await page.evaluate(button => button.innerText, btn);
+        if (btnText && (btnText.includes("Accept all") || btnText.includes("I agree") || btnText.includes("Accept"))) {
+          logTime(`Found consent button with text: "${btnText}"`);
+          await btn.click();
+          await delay(2000);
+          break;
+        }
+      }
+    } catch (error) {
+      logTime(`Error handling consent: ${error.message}`);
+    }
+
+    // Wait for results to load – adjust timeouts if needed
+    logTime("Waiting for search results to load");
+    try {
+      await Promise.race([
+        page.waitForSelector('div[role="article"]', { timeout: 10000 }),
+        page.waitForSelector('a[href*="/maps/place/"]', { timeout: 10000 }),
+        page.waitForSelector('div.fontHeadlineSmall', { timeout: 10000 })
+      ]);
+      logTime("Results loaded successfully");
+    } catch (error) {
+      logTime(`Timeout waiting for results: ${error.message}`);
+    }
+
+    // Scroll to load more results
+    logTime("Scrolling to load more results");
+    await autoScroll(page);
+
+    // Get HTML content for parsing
+    const html = await page.content();
+
+    // Extract business information using your extraction methods
+    logTime("Extracting business details");
+    const businesses = await extractBusinessInformation(page, html);
+
+    // If too few results, try alternative extraction via a Google search
+    if (businesses.length < 3) {
+      logTime("Found few results, trying alternative extraction");
+      const altBusinesses = await alternativeExtraction(page, query);
+      businesses.push(...altBusinesses);
+    }
+
+    const uniqueBusinesses = removeDuplicates(businesses);
+    logTime(`Found ${uniqueBusinesses.length} unique businesses`);
+    return uniqueBusinesses;
+  } catch (error) {
+    logTime(`ERROR: ${error.message}`);
+    console.error(error);
+    return [];
+  } finally {
+    if (browser) {
+      logTime("Closing browser");
+      await browser.close();
+    }
+  }
 }
 
-// Helper to extract with a specific selector
-function extractWithSelector($, selector, businesses) {
-  const elements = $(selector);
-  console.log(`Found ${elements.length} elements with selector: ${selector}`);
-  
-  elements.each((i, el) => {
-    try {
-      const element = $(el);
-      
-      // Find business name
-      let name = element.find('div.fontHeadlineSmall').text().trim();
-      if (!name) name = element.find('h3').text().trim();
-      if (!name && selector === 'div.fontHeadlineSmall') name = element.text().trim();
-      
-      if (!name) return;
-      
-      // Find URL
-      let url = '';
-      if (selector === 'a[href*="/maps/place/"]') {
-        url = element.attr('href') || '';
-      } else {
-        url = element.find('a[href*="/maps/place/"]').attr('href') || '';
-      }
-      
-      // Extract place ID from URL
-      let placeId = 'N/A';
-      const placeIdMatch = url.match(/place\/[^\/]+\/([^\/\?]+)/);
-      if (placeIdMatch) placeId = placeIdMatch[1];
-      if (!placeId || placeId === 'N/A') {
-        const altMatch = url.match(/ChI[\w-]+/);
-        if (altMatch) placeId = altMatch[0];
-      }
-      
-      // Find all text elements
-      const allTextElements = element.find('div, span').map((i, el) => $(el).text().trim()).get();
-      
-      // Find phone number
-      let phone = 'N/A';
-      for (const text of allTextElements) {
-        if (/^[\+]?[(]?[0-9]{3}[)]?[-\s\.]?[0-9]{3}[-\s\.]?[0-9]{4,6}$/.test(text.replace(/\s/g, ''))) {
-          phone = text;
-          break;
-        }
-      }
-      
-      // Find address (text with commas)
-      let address = 'N/A';
-      for (const text of allTextElements) {
-        if (text.includes(',') && text.length > 10 && !text.includes(name)) {
-          address = text;
-          break;
-        }
-      }
-      
-      // Add to businesses array
-      businesses.push({
-        index: businesses.length + 1,
-        storeName: name,
-        placeId: placeId,
-        address: address,
-        category: 'N/A', // Hard to determine reliably
-        phone: phone,
-        googleUrl: url ? `https://www.google.com${url}` : 'N/A',
-        bizWebsite: 'N/A',
-        ratingText: 'N/A'
-      });
-    } catch (error) {
-      console.log(`Error processing element ${i}:`, error.message);
-    }
-  });
-}
 
 // Alternative extraction method using Google search instead of maps
 async function alternativeExtraction(page, query) {
