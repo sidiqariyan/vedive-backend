@@ -20,7 +20,7 @@ async function autoScroll(page) {
       window.scrollBy(0, distance);
       totalHeight += distance;
       scrolls++;
-      await new Promise(resolve => setTimeout(resolve, 700));
+      await new Promise(resolve => setTimeout(resolve, 3000));
       if (totalHeight >= document.body.scrollHeight) break;
     }
   }, { timeout: 60000 });
