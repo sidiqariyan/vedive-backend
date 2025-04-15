@@ -21,17 +21,17 @@ function logTime(message) {
 // Main scraping function
 async function searchGoogleMaps(query) {
   logTime(`Starting search for: "${query}"`);
-  
+
   // Validate input
   if (!query || typeof query !== "string" || query.trim() === "") {
     throw new Error("Invalid query. Please provide a valid search term.");
   }
-  
+
   let browser;
   try {
-    // Launch with specific configurations to avoid detection
+    // Launch options with custom configurations
     const launchOptions = {
-      headless: 'new', // Use new headless mode for better compatibility
+      headless: 'new', // using new headless mode for better compatibility
       args: [
         '--no-sandbox',
         '--disable-setuid-sandbox',
@@ -41,45 +41,53 @@ async function searchGoogleMaps(query) {
         '--window-size=1920,1080'
       ],
       ignoreHTTPSErrors: true,
-      defaultViewport: null // Use viewport of the window
+      defaultViewport: null
     };
-    
+
     logTime("Launching browser");
     browser = await puppeteer.launch(launchOptions);
-    
-    // Create a new incognito browser context
-    const context = await browser.createIncognitoBrowserContext();
-    const page = await context.newPage();
-    
-    // Set convincing user agent and headers
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36');
+
+    // For debugging purposes, log available methods
+    console.log("Browser methods available:", Object.keys(browser));
+
+    // Conditionally create an incognito browser context if supported; otherwise, use default
+    let page;
+    if (typeof browser.createIncognitoBrowserContext === "function") {
+      logTime("Creating incognito browser context");
+      const context = await browser.createIncognitoBrowserContext();
+      page = await context.newPage();
+    } else {
+      console.warn("Incognito mode not supported. Using default page context.");
+      page = await browser.newPage();
+    }
+
+    // Set a convincing user agent and additional headers
+    await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36");
     await page.setExtraHTTPHeaders({
-      'Accept-Language': 'en-US,en;q=0.9',
-      'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8'
+      "Accept-Language": "en-US,en;q=0.9",
+      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8"
     });
-    
-    // Enable console logging from the browser
-    page.on('console', msg => console.log(`Browser console: ${msg.text()}`));
-    
-    // Print navigation events for debugging
-    page.on('response', response => {
+
+    // Enable console logging from within the browser context
+    page.on("console", (msg) => console.log(`Browser console: ${msg.text()}`));
+    page.on("response", (response) => {
       const status = response.status();
       if (status >= 300) {
         console.log(`Response ${status} for URL: ${response.url()}`);
       }
     });
-    
-    // Generate a direct search URL with appropriate parameters
+
+    // Construct the search URL for Google Maps
     const searchUrl = `https://www.google.com/maps/search/${encodeURIComponent(query)}`;
     logTime(`Navigating to ${searchUrl}`);
-    
-    // Try navigation with retry logic
+
+    // Retry navigation up to three times
     let navigationSuccess = false;
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        await page.goto(searchUrl, { 
-          waitUntil: 'networkidle2',
-          timeout: 60000 
+        await page.goto(searchUrl, {
+          waitUntil: "networkidle2",
+          timeout: 60000
         });
         navigationSuccess = true;
         logTime(`Navigation successful on attempt ${attempt}`);
@@ -90,24 +98,22 @@ async function searchGoogleMaps(query) {
         await delay(3000);
       }
     }
-    
     if (!navigationSuccess) {
       throw new Error("Failed to navigate to Google Maps after multiple attempts");
     }
-    
-    // Check for and handle consent dialogs
+
+    // Handle consent dialogs if they appear
     logTime("Checking for consent dialogs");
     try {
-      // Try multiple selectors for accept buttons
       const consentSelectors = [
-        'button[jsname="higCR"]', // Common consent button
+        'button[jsname="higCR"]',
         'button[aria-label="Accept all"]',
         'button:contains("I agree")',
         'button:contains("Accept")'
       ];
-      
+
       for (const selector of consentSelectors) {
-        const consentExists = await page.$(selector) !== null;
+        const consentExists = (await page.$(selector)) !== null;
         if (consentExists) {
           logTime(`Found consent button with selector: ${selector}`);
           await page.click(selector);
@@ -119,11 +125,10 @@ async function searchGoogleMaps(query) {
       logTime(`Error handling consent: ${error.message}`);
       // Continue even if consent handling fails
     }
-    
-    // Wait for map to load
+
+    // Wait for search results to load
     logTime("Waiting for search results to load");
     try {
-      // Wait for any of these selectors to indicate results loaded
       await Promise.race([
         page.waitForSelector('div[role="article"]', { timeout: 10000 }),
         page.waitForSelector('a[href*="/maps/place/"]', { timeout: 10000 }),
@@ -132,37 +137,28 @@ async function searchGoogleMaps(query) {
       logTime("Results loaded successfully");
     } catch (error) {
       logTime(`Timeout waiting for results: ${error.message}`);
-      // Continue and check content anyway
     }
-    
+
     // Scroll to load more results
     logTime("Scrolling to load more results");
     await autoScroll(page);
-    
-    // Save screenshot for debugging (uncomment when needed)
-    // await page.screenshot({ path: 'debug-maps-screenshot.png', fullPage: true });
-    
-    // Save HTML for debugging
+
+    // Get page content for parsing
     const html = await page.content();
-    // Uncomment to save HTML for debugging
-    // const debugDir = path.join(__dirname, 'debug');
-    // if (!fs.existsSync(debugDir)) fs.mkdirSync(debugDir);
-    // fs.writeFileSync(path.join(debugDir, 'google-maps-debug.html'), html);
-    
-    // Parse with multiple approaches
+
+    // Extract business information using helper functions
     logTime("Extracting business details");
     const businesses = await extractBusinessInformation(page, html);
-    
-    // If we found less than 3 results, try an alternative approach
+
+    // If few results were found, try an alternative extraction method
     if (businesses.length < 3) {
       logTime("Found few results, trying alternative extraction");
       const altBusinesses = await alternativeExtraction(page, query);
       businesses.push(...altBusinesses);
     }
-    
+
     // Remove duplicates
     const uniqueBusinesses = removeDuplicates(businesses);
-    
     logTime(`Found ${uniqueBusinesses.length} unique businesses`);
     return uniqueBusinesses;
   } catch (error) {
