@@ -64,8 +64,8 @@ async function navigateWithRetries(page, url, maxRetries = 3) {
 // Extract search results from the Bing search page
 async function extractSearchResults(page) {
   console.log('Extracting search results...');
-  // Wait for the Bing results container to load
-  await page.waitForSelector('ol#b_results', { timeout: 10000 });
+  // Wait for either Bing's result container or at least one result item.
+  await page.waitForSelector('ol#b_results, li.b_algo', { timeout: 15000 });
   const results = await page.evaluate(() => {
     const extractedResults = [];
     // Bing search results are typically in list items with class "b_algo"
