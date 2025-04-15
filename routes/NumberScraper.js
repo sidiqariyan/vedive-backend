@@ -39,13 +39,14 @@ async function autoScroll(page) {
   });
 }
 
-// Extract business information from the page HTML using Cheerio
+// Extract business information using Cheerio from the Google Maps HTML
 async function extractBusinessInformation(page, html) {
   logTime("Extracting business information via Cheerio");
   const businesses = [];
   const $ = cheerio.load(html);
   
-  // Look for business containers (adjust selectors as needed)
+  // Adjust the selector as needed. Google Maps pages are dynamic,
+  // so sometimes selectors change.
   $('div[role="article"]').each((i, elem) => {
     const storeName = $(elem).find('div.fontHeadlineSmall').text().trim();
     if (storeName) {
@@ -69,14 +70,18 @@ async function extractBusinessInformation(page, html) {
 async function alternativeExtraction(page, query) {
   try {
     logTime("Trying alternative extraction via Google Search");
+    // Longer delay to let Google settle down
+    await delay(5000);
+    
+    // Ideally, use a proxy here to avoid HTTP 429:
+    // For example, pass proxy settings in launchOptions.
     await page.goto(
       `https://www.google.com/search?q=${encodeURIComponent(query)}+business+phone+number`,
       { waitUntil: 'networkidle2' }
     );
-    await delay(3000);
+    await delay(5000);
     return await page.evaluate(() => {
       const businesses = [];
-      // Select business cards using common selectors
       const businessCards = Array.from(
         document.querySelectorAll('div.vwVdIc, div.VkpGBb, div[data-hveid]')
       );
@@ -93,14 +98,12 @@ async function alternativeExtraction(page, query) {
           )
             .map(el => el.textContent.trim())
             .filter(text => text.length > 0);
-          // Find a phone number
           for (const text of allText) {
             if (/^[\+]?[(]?[0-9]{3}[)]?[-\s\.]?[0-9]{3}[-\s\.]?[0-9]{4,6}$/.test(text.replace(/\s/g, ''))) {
               phone = text;
               break;
             }
           }
-          // Find address if possible
           for (const text of allText) {
             if (text.includes(',') && text.length > 10 && !text.includes(name)) {
               address = text;
@@ -164,7 +167,8 @@ async function searchGoogleMaps(query) {
         '--window-size=1920,1080'
       ],
       // Uncomment and specify executablePath if needed, e.g., '/usr/bin/chromium-browser'
-      // executablePath: '/usr/bin/chromium-browser',
+      // Also consider adding proxy parameters here if you have a proxy pool.
+      // For example: args: [..., '--proxy-server=your-proxy:port']
       ignoreHTTPSErrors: true,
       defaultViewport: null
     };
