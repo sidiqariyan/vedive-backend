@@ -127,10 +127,9 @@ async function saveToCSV(businesses) {
     return null;
   }
 }
-
-// Number Scraper Endpoint remains unchanged
 app.post("/api/numberScraper", authenticate, async (req, res) => {
-  const { query, campaignName } = req.query;
+  const { query, campaignName } = req.body; // Updated: reading from req.body
+
   if (!query || !campaignName) {
     return res.status(400).json({ error: "Query and Campaign Name are required" });
   }
@@ -190,7 +189,6 @@ app.post("/api/numberScraper", authenticate, async (req, res) => {
     res.status(500).json({ error: "An error occurred while scraping numbers" });
   }
 });
-
 // Secure File Download Endpoint remains unchanged
 app.post("/api/download", authenticate, (req, res) => {
   const { filename } = req.query;
