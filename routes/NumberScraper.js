@@ -9,7 +9,7 @@ function delay(ms) {
   return new Promise(resolve => setTimeout(resolve, ms));
 }
 
-// Function to auto-scroll the page
+// Function to auto-scroll the page to load dynamic results
 async function autoScroll(page) {
   await page.evaluate(async () => {
     let totalHeight = 0;
@@ -26,11 +26,11 @@ async function autoScroll(page) {
   }, { timeout: 60000 });
 }
 
-// Retry navigation logic
+// Retry navigation logic in case of intermittent failures
 async function navigateWithRetries(page, url, retries = 3) {
   for (let i = 0; i < retries; i++) {
     try {
-      await page.goto(url, { waitUntil: 'networkidle2' });
+      await page.goto(url, { waitUntil: 'networkidle2', timeout: 60000 });
       return;
     } catch (error) {
       console.warn(`Navigation attempt ${i + 1} failed. Retrying...`);
@@ -42,11 +42,13 @@ async function navigateWithRetries(page, url, retries = 3) {
 // Helper function to parse business details from a container element
 function parseBusinessDetails(container, index) {
   try {
-    const url = container.find('a[href*="/maps/place/"]').attr('href');
+    // Update selectors based on the current Google Maps layout.
+    // These selectors may need to be adjusted based on your inspection of the page.
+    const url = container.find('a[href*="/maps/place/"]').attr('href') || "N/A";
     const website = container.find('a[data-value="Website"]').attr('href') || "N/A";
-    // Adjust these selectors based on the actual Google Maps markup
     const storeName = container.find('.fontHeadlineSmall').text().trim() || "N/A";
     const ratingText = container.find('span[aria-label]').attr('aria-label') || "N/A";
+    // This is an example—if the details are separated by "·", split them.
     const detailsRaw = container.find('.fontBodyMedium').first().text();
     const detailsText = detailsRaw ? detailsRaw.split('·').map(t => t.trim()) : [];
     const category = detailsText[0] || "N/A";
@@ -74,33 +76,36 @@ function parseBusinessDetails(container, index) {
   }
 }
 
-// Main scraping function
+// Main scraping function for Google Maps
 async function searchGoogleMaps(query) {
   if (!query || typeof query !== "string" || query.trim() === "") {
     throw new Error("Invalid query. Please provide a valid search term.");
   }
 
-  console.log(`Received query: "${query}" (please verify spelling)`);
+  console.log(`Received query: "${query}"`);
 
   let browser;
   try {
     browser = await puppeteer.launch({
-      headless: process.env.HEADLESS !== "false", // set to false for debugging if needed
+      headless: process.env.HEADLESS !== "false",
       args: ["--no-sandbox", "--disable-setuid-sandbox", "--disable-gpu"],
     });
 
     const page = await browser.newPage();
-    
     // Set a common user agent string
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) ' +
-      'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
-    
+    await page.setUserAgent(
+      'Mozilla/5.0 (Windows NT 10.0; Win64; x64) ' +
+      'AppleWebKit/537.36 (KHTML, like Gecko) ' +
+      'Chrome/91.0.4472.124 Safari/537.36'
+    );
+
     const searchUrl = `https://www.google.com/maps/search/${encodeURIComponent(query)}`;
     console.log(`Navigating to Google Maps with query: ${query}`);
     await navigateWithRetries(page, searchUrl);
-    
+
+    // Increase the waiting time to ensure dynamic content loads
     console.log("Waiting for initial page load...");
-    await delay(5000); // Replacing page.waitForTimeout with delay
+    await delay(8000);
 
     console.log("Scrolling through results...");
     await autoScroll(page);
@@ -108,24 +113,22 @@ async function searchGoogleMaps(query) {
     console.log("Extracting page content...");
     const html = await page.content();
 
-    // Optional: log a snippet of HTML to debug
-    // console.log("HTML snippet:", html.substring(0, 500));
-
     const $ = cheerio.load(html);
     const businesses = [];
 
     console.log("Parsing business data...");
-    // Primary approach: try using a dedicated container if available.
-    $('div.section-result').each((i, el) => {
+    // Primary selector (update this selector if Google Maps markup has changed)
+    $("div.section-result").each((i, el) => {
       const container = $(el);
       const business = parseBusinessDetails(container, i);
       if (business) businesses.push(business);
     });
 
+    // Fallback: try an alternate selector if no results were found
     if (businesses.length === 0) {
       console.warn("No results found using primary selector; using fallback selector.");
-      $('a[href*="/maps/place/"]').each((i, el) => {
-        const container = $(el).closest('div');
+      $("div.section-result-content").each((i, el) => {
+        const container = $(el);
         const business = parseBusinessDetails(container, i);
         if (business) businesses.push(business);
       });
@@ -137,14 +140,6 @@ async function searchGoogleMaps(query) {
     );
 
     console.log(`Found ${uniqueBusinesses.length} unique businesses`);
-
-    // Sort businesses by rating (highest first)
-    uniqueBusinesses.sort((a, b) => {
-      const ratingA = parseFloat(a.ratingText.replace(/[^0-9.]/g, "")) || 0;
-      const ratingB = parseFloat(b.ratingText.replace(/[^0-9.]/g, "")) || 0;
-      return ratingB - ratingA;
-    });
-
     console.log(`Scraped ${uniqueBusinesses.length} businesses successfully.`);
     return uniqueBusinesses;
   } catch (error) {
