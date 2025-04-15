@@ -127,41 +127,61 @@ async function saveToCSV(businesses) {
     return null;
   }
 }
-app.post("/api/numberScraper", authenticate, async (req, res) => {
-  const { query, campaignName } = req.body; // Updated: reading from req.body
 
+app.post("/api/numberScraper", authenticate, async (req, res) => {
+  // Read parameters from the request body
+  const { query, campaignName } = req.body;
+
+  // Ensure required fields are provided
   if (!query || !campaignName) {
     return res.status(400).json({ error: "Query and Campaign Name are required" });
   }
+
+  // Check if user is authenticated and has a valid user ID
   const userId = req.user?._id;
   if (!userId) {
     return res.status(401).json({ error: "User must be authenticated" });
   }
+
+  // Utility function to sanitize input
   const sanitizeInput = (input) => {
     if (typeof input !== "string") return "";
+    // Remove any non-alphanumeric (and non-space) characters and limit to 100 characters
     return input.replace(/[^\w\s]/gi, "").trim().slice(0, 100);
   };
+
+  // Sanitize both the query and campaign name
   const sanitizedQuery = sanitizeInput(query);
   const sanitizedCampaignName = sanitizeInput(campaignName);
   if (!sanitizedQuery || !sanitizedCampaignName) {
     return res.status(400).json({ error: "Invalid query or campaign name after sanitization" });
   }
+
   try {
+    // Call the scraping function with the sanitized query
     const businesses = await searchGoogleMaps(sanitizedQuery);
+
     if (!businesses || businesses.length === 0) {
       return res.status(404).json({ message: "No businesses found" });
     }
+
+    // Validate phone numbers using a simple regex test
     const isValidPhoneNumber = (phoneNumber) => {
       if (typeof phoneNumber !== "string") return false;
       const phoneRegex = /^[+]?[(]?[0-9]{1,4}[)]?[-\s./0-9]*$/;
       return phoneRegex.test(phoneNumber);
     };
+
+    // Extract valid phone numbers from the scraped businesses data
     const phoneNumbers = businesses
       .map((business) => business.phone || business.phoneNumber)
       .filter((phoneNumber) => phoneNumber && isValidPhoneNumber(phoneNumber));
+
     if (!phoneNumbers || phoneNumbers.length === 0) {
       return res.status(404).json({ message: "No valid phone numbers found in the scraped data" });
     }
+
+    // Create a new campaign record with the scraped data
     const newCampaign = new Campaign({
       userId,
       campaignName: sanitizedCampaignName,
@@ -171,12 +191,18 @@ app.post("/api/numberScraper", authenticate, async (req, res) => {
       status: "completed",
     });
     await newCampaign.save();
+
+    // Save the complete businesses data to a CSV file
     const csvFileName = await saveToCSV(businesses);
     if (!csvFileName) {
       return res.status(500).json({ error: "Failed to save CSV file" });
     }
+
+    // Build the download URL for the CSV file using the BASE_URL from environment variables
     const baseUrl = process.env.BASE_URL || "http://localhost:3000";
     const csvDownloadUrl = `${baseUrl}/api/download?filename=${encodeURIComponent(csvFileName)}`;
+
+    // Return a successful response with all relevant information
     res.status(200).json({
       message: "Number scraping completed successfully",
       campaignId: newCampaign._id,
