@@ -12,7 +12,8 @@ const connectDB = require("./db");
 const { authenticate } = require("./middleware/authMiddleware");
 const Campaign = require("./models/Campaign");
 const User = require("./models/User");
-const { searchGoogleMaps } = require("./routes/NumberScraper");
+// Updated import: using 'searchGoogle' instead of 'searchGoogleMaps'
+const { searchGoogle } = require("./routes/NumberScraper");
 const { checkExpiredSubscriptions } = require("./utils/subscriptionChecker");
 
 const app = express();
@@ -127,7 +128,9 @@ async function saveToCSV(businesses) {
     console.error("Error writing CSV file:", error.message);
     return null;
   }
-}app.post("/api/numberScraper", authenticate, async (req, res) => {
+}
+
+app.post("/api/numberScraper", authenticate, async (req, res) => {
   console.log("====== Number Scraper Endpoint Accessed ======");
   console.log("Request body:", req.body);
   console.log("User ID:", req.user?._id);
@@ -159,8 +162,9 @@ async function saveToCSV(businesses) {
   }
   
   try {
-    console.log(`Starting Google Maps search for '${sanitizedQuery}'`);
-    const businesses = await searchGoogleMaps(sanitizedQuery);
+    // Updated log message and function call to use searchGoogle instead of searchGoogleMaps
+    console.log(`Starting Google search for '${sanitizedQuery}'`);
+    const businesses = await searchGoogle(sanitizedQuery);
     
     console.log(`Search completed. Found ${businesses?.length || 0} businesses`);
     
@@ -218,6 +222,7 @@ async function saveToCSV(businesses) {
     res.status(500).json({ error: "An error occurred while scraping numbers", details: process.env.NODE_ENV === 'development' ? error.message : undefined });
   }
 });
+
 // Secure File Download Endpoint
 app.get("/api/download", authenticate, (req, res) => {
   const { filename } = req.query;
