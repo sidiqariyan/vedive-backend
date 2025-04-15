@@ -21,7 +21,7 @@ function logTime(message) {
 // Auto-scroll function to load more results
 async function autoScroll(page) {
   return await page.evaluate(async () => {
-    return await new Promise(resolve => {
+    return new Promise(resolve => {
       let totalHeight = 0;
       const distance = 800;
       const maxScrolls = 15;
@@ -45,8 +45,7 @@ async function extractBusinessInformation(page, html) {
   const businesses = [];
   const $ = cheerio.load(html);
   
-  // Adjust the selector as needed. Google Maps pages are dynamic,
-  // so sometimes selectors change.
+  // Adjust the selector as needed.
   $('div[role="article"]').each((i, elem) => {
     const storeName = $(elem).find('div.fontHeadlineSmall').text().trim();
     if (storeName) {
@@ -70,11 +69,10 @@ async function extractBusinessInformation(page, html) {
 async function alternativeExtraction(page, query) {
   try {
     logTime("Trying alternative extraction via Google Search");
-    // Longer delay to let Google settle down
+    // Wait longer before navigating to allow for cooling off
     await delay(5000);
     
-    // Ideally, use a proxy here to avoid HTTP 429:
-    // For example, pass proxy settings in launchOptions.
+    // Navigate to Google Search with the query plus extra keywords
     await page.goto(
       `https://www.google.com/search?q=${encodeURIComponent(query)}+business+phone+number`,
       { waitUntil: 'networkidle2' }
@@ -93,9 +91,7 @@ async function alternativeExtraction(page, query) {
           if (!name) return;
           let phone = 'N/A';
           let address = 'N/A';
-          const allText = Array.from(
-            card.querySelectorAll('div, span')
-          )
+          const allText = Array.from(card.querySelectorAll('div, span'))
             .map(el => el.textContent.trim())
             .filter(text => text.length > 0);
           for (const text of allText) {
@@ -156,19 +152,26 @@ async function searchGoogleMaps(query) {
 
   let browser;
   try {
+    // If you have a proxy server, set the PROXY_SERVER env variable (e.g., "http://your-proxy:port")
+    const proxy = process.env.PROXY_SERVER ? `--proxy-server=${process.env.PROXY_SERVER}` : null;
+    const args = [
+      '--no-sandbox',
+      '--disable-setuid-sandbox',
+      '--disable-web-security',
+      '--disable-features=IsolateOrigins',
+      '--disable-site-isolation-trials',
+      '--window-size=1920,1080'
+    ];
+    if (proxy) {
+      args.push(proxy);
+      logTime(`Using proxy: ${process.env.PROXY_SERVER}`);
+    }
+
     const launchOptions = {
-      headless: 'new', // Use 'new' headless mode or try true if issues occur
-      args: [
-        '--no-sandbox',
-        '--disable-setuid-sandbox',
-        '--disable-web-security',
-        '--disable-features=IsolateOrigins',
-        '--disable-site-isolation-trials',
-        '--window-size=1920,1080'
-      ],
+      headless: 'new', // Use 'new' headless mode; or try true if issues occur
+      args,
       // Uncomment and specify executablePath if needed, e.g., '/usr/bin/chromium-browser'
-      // Also consider adding proxy parameters here if you have a proxy pool.
-      // For example: args: [..., '--proxy-server=your-proxy:port']
+      // Also consider adding proxy parameters here if not using PROXY_SERVER
       ignoreHTTPSErrors: true,
       defaultViewport: null
     };
@@ -194,8 +197,8 @@ async function searchGoogleMaps(query) {
     });
 
     // Log browser console messages and response statuses
-    page.on("console", (msg) => console.log(`Browser console: ${msg.text()}`));
-    page.on("response", (response) => {
+    page.on("console", msg => console.log(`Browser console: ${msg.text()}`));
+    page.on("response", response => {
       const status = response.status();
       if (status >= 300) {
         console.log(`Response ${status} for URL: ${response.url()}`);
@@ -208,10 +211,7 @@ async function searchGoogleMaps(query) {
     let navigationSuccess = false;
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        await page.goto(searchUrl, {
-          waitUntil: "networkidle2",
-          timeout: 60000
-        });
+        await page.goto(searchUrl, { waitUntil: "networkidle2", timeout: 60000 });
         navigationSuccess = true;
         logTime(`Navigation successful on attempt ${attempt}`);
         break;
