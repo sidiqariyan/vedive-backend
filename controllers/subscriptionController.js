@@ -1,30 +1,22 @@
+const mongoose = require('mongoose');
 const axios = require("axios");
 const { secret_key, app_id } = require("../config/secret");
 const Subscription = require("../models/SubscriptionPlan");
 
-// Optional safeguard: map plan IDs to prices
-const planPrices = {
-  starter: 49,
-  business: 199,
-  enterprise: 699,
+const planDetails = {
+  starter: { price: 49, duration: 1 * 24 * 60 * 60 * 1000, label: "1-day" },
+  business: { price: 199, duration: 7 * 24 * 60 * 60 * 1000, label: "1-week" },
+  enterprise: { price: 699, duration: 30 * 24 * 60 * 60 * 1000, label: "1-month" }
 };
 
 const createSubscriptionOrder = async (req, res) => {
   try {
-    const { planId, email, phone, name, amount } = req.body;
+    const { planId, email, phone, name } = req.body;
     const orderId = "ORID" + Date.now();
     const customerId = "CID" + Date.now();
 
-    // Use the provided amount or fallback to the mapped price
-   // after
-const orderAmount = planPrices[planId];
-if (!orderAmount) {
-  return res.status(400).json({
-    success: false,
-    message: `Invalid planId "${planId}" – must be one of ${Object.keys(planPrices).join(', ')}`
-  });
-}
-
+    const selectedPlan = planDetails[planId] || { price: 1 };
+    const orderAmount = selectedPlan.price;
 
     const options = {
       method: "POST",
@@ -76,21 +68,7 @@ const verifyPayment = async (req, res) => {
   const userId = req.query.userId || "user123";
   const planId = req.query.planId || "starter";
 
-  let planDuration = 0;
-  switch (planId) {
-    case "starter":
-      planDuration = 24 * 60 * 60 * 1000; // 1 day
-      break;
-    case "business":
-      planDuration = 7 * 24 * 60 * 60 * 1000; // 1 week
-      break;
-    case "enterprise":
-      planDuration = 30 * 24 * 60 * 60 * 1000; // 1 month
-      break;
-    default:
-      planDuration = 0; // free plan – no expiry
-      break;
-  }
+  const selectedPlan = planDetails[planId] || { duration: 1 * 24 * 60 * 60 * 1000, label: "1-day" };
 
   try {
     let url = `https://sandbox.cashfree.com/pg/orders/${orderid}`;
@@ -117,14 +95,21 @@ const verifyPayment = async (req, res) => {
       if (!sub) {
         sub = new Subscription({
           userId,
-          plan: planId,
+          planId,
+          orderId: orderid,
+          amount: selectedPlan.price,
+          duration: selectedPlan.label,
+          status: orderStatus,
           startDate: new Date(),
-          endDate: planDuration ? new Date(Date.now() + planDuration) : null
+          endDate: new Date(Date.now() + selectedPlan.duration)
         });
       } else {
-        sub.plan = planId;
+        sub.planId = planId;
+        sub.amount = selectedPlan.price;
+        sub.duration = selectedPlan.label;
+        sub.status = orderStatus;
         sub.startDate = new Date();
-        sub.endDate = planDuration ? new Date(Date.now() + planDuration) : null;
+        sub.endDate = new Date(Date.now() + selectedPlan.duration);
       }
       await sub.save();
 
@@ -155,25 +140,25 @@ const verifyPayment = async (req, res) => {
 const getSubscriptionStatus = async (req, res) => {
   const userId = req.query.userId || "user123";
   let subscription = await Subscription.findOne({ userId });
-  if (subscription) {
-    if (subscription.endDate && new Date() > subscription.endDate) {
-      subscription.plan = "free";
-      subscription.startDate = new Date();
-      subscription.endDate = null;
-      await subscription.save();
-    }
+  if (subscription && subscription.endDate && new Date() > subscription.endDate) {
+    subscription.planId = "free";
+    subscription.startDate = new Date();
+    subscription.endDate = null;
+    subscription.status = "EXPIRED";
+    subscription.duration = "1-day";
+    await subscription.save();
   }
   res.status(200).json({
     success: true,
-    hasActiveSubscription: subscription ? subscription.plan !== "free" : false,
-    currentPlan: subscription ? subscription.plan : "free",
+    hasActiveSubscription: subscription ? subscription.planId !== "free" : false,
+    currentPlan: subscription ? subscription.planId : "free",
     subscription
   });
 };
 
 module.exports = {
-  // alias it so your route stays the same:
   createOrder: createSubscriptionOrder,
+  createSubscriptionOrder,
   verifyPayment,
   getSubscriptionStatus
 };
