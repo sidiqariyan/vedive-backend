@@ -138,7 +138,7 @@ const verifyPayment = async (req, res) => {
 };
 
 const getSubscriptionStatus = async (req, res) => {
-  const userId = req.query.userId || "user123";
+  const userId = "user123";
   let subscription = await Subscription.findOne({ userId });
   if (subscription && subscription.endDate && new Date() > subscription.endDate) {
     subscription.planId = "free";
