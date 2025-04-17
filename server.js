@@ -82,13 +82,16 @@ app.use("/api/payment", cashfreeRoute);
 app.use("/api/subscription", subscriptionRoute);
 
 // Updated Email Scraper Endpoint
-const { handleEmailScraper } = require("./routes/scraper");
 app.post("/api/email-scraper", authenticate, async (req, res) => {
   try {
     const { query, campaignName } = req.body;
     if (!query || !campaignName) {
       return res.status(400).json({ error: "Query and Campaign Name are required" });
     }
+    
+    // Add the user ID from the authentication middleware
+    req.body.userId = req.user._id;
+    
     return await handleEmailScraper(req, res);
   } catch (error) {
     console.error("Error in /api/email-scraper:", error);
