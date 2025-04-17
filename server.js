@@ -12,8 +12,7 @@ const connectDB = require("./db");
 const { authenticate } = require("./middleware/authMiddleware");
 const Campaign = require("./models/Campaign");
 const User = require("./models/User");
-// Updated import: using 'searchGoogle' instead of 'searchGoogleMaps'
-const { searchGoogle } = require("./routes/NumberScraper");
+const { searchGoogleMaps } = require("./routes/NumberScraper");
 const { checkExpiredSubscriptions } = require("./utils/subscriptionChecker");
 
 const app = express();
@@ -80,18 +79,15 @@ const subscriptionRoute = require("./routes/subscriptionRoutes");
 app.use("/api/blog", require("./routes/blogRoute"));
 app.use("/api/payment", cashfreeRoute);
 app.use("/api/subscription", subscriptionRoute);
-const { handleEmailScraper } = require("./routes/scraper");
+
 // Updated Email Scraper Endpoint
+const { handleEmailScraper } = require("./routes/scraper");
 app.post("/api/email-scraper", authenticate, async (req, res) => {
   try {
     const { query, campaignName } = req.body;
     if (!query || !campaignName) {
       return res.status(400).json({ error: "Query and Campaign Name are required" });
     }
-    
-    // Add the user ID from the authentication middleware
-    req.body.userId = req.user._id;
-    
     return await handleEmailScraper(req, res);
   } catch (error) {
     console.error("Error in /api/email-scraper:", error);
@@ -132,124 +128,99 @@ async function saveToCSV(businesses) {
     return null;
   }
 }
+app.post("/api/numberScraper", authenticate, async (req, res) => {
+  const { query, campaignName } = req.body; // Changed from req.query to req.body
+  if (!query || !campaignName) {
+    return res.status(400).json({ error: "Query and Campaign Name are required" });
+  }
+  const userId = req.user?._id;
+  if (!userId) {
+    return res.status(401).json({ error: "User must be authenticated" });
+  }
+  const sanitizeInput = (input) => {
+    if (typeof input !== "string") return "";
+    return input.replace(/[^\w\s]/gi, "").trim().slice(0, 100);
+  };
+  const sanitizedQuery = sanitizeInput(query);
+  const sanitizedCampaignName = sanitizeInput(campaignName);
+  if (!sanitizedQuery || !sanitizedCampaignName) {
+    return res.status(400).json({ error: "Invalid query or campaign name after sanitization" });
+  }
+  try {
+    const businesses = await searchGoogleMaps(sanitizedQuery);
+    if (!businesses || businesses.length === 0) {
+      return res.status(404).json({ message: "No businesses found" });
+    }
+    const isValidPhoneNumber = (phoneNumber) => {
+      if (typeof phoneNumber !== "string") return false;
+      const phoneRegex = /^[+]?[(]?[0-9]{1,4}[)]?[-\s./0-9]*$/;
+      return phoneRegex.test(phoneNumber);
+    };
+    const phoneNumbers = businesses
+      .map((business) => business.phone || business.phoneNumber)
+      .filter((phoneNumber) => phoneNumber && isValidPhoneNumber(phoneNumber));
+    if (!phoneNumbers || phoneNumbers.length === 0) {
+      return res.status(404).json({ message: "No valid phone numbers found in the scraped data" });
+    }
+    const newCampaign = new Campaign({
+      userId,
+      campaignName: sanitizedCampaignName,
+      toolType: "number-scraper",
+      query: sanitizedQuery,
+      scrapedNumbers: phoneNumbers,
+      status: "completed",
+    });
+    await newCampaign.save();
+    const csvFileName = await saveToCSV(businesses);
+    if (!csvFileName) {
+      return res.status(500).json({ error: "Failed to save CSV file" });
+    }
+    
+    const csvDownloadUrl = `/api/download?filename=${encodeURIComponent(csvFileName)}`;
+    res.status(200).json({
+      message: "Number scraping completed successfully",
+      campaignId: newCampaign._id,
+      businesses,
+      csvFileName,
+      csvDownloadUrl,
+    });
+  } catch (error) {
+    console.error("Error in /numberScraper:", error.stack);
+    res.status(500).json({ error: "An error occurred while scraping numbers" });
+  }
+});
 
-// app.post("/api/numberScraper", authenticate, async (req, res) => {
-//   console.log("====== Number Scraper Endpoint Accessed ======");
-//   console.log("Request body:", req.body);
-//   console.log("User ID:", req.user?._id);
-  
-//   const { query, campaignName } = req.body; 
-  
-//   if (!query || !campaignName) {
-//     console.log("Missing required fields:", { query, campaignName });
-//     return res.status(400).json({ error: "Query and Campaign Name are required" });
-//   }
-  
-//   const userId = req.user?._id;
-//   if (!userId) {
-//     console.log("Authentication failed: No user ID");
-//     return res.status(401).json({ error: "User must be authenticated" });
-//   }
-  
-//   const sanitizeInput = (input) => {
-//     if (typeof input !== "string") return "";
-//     return input.replace(/[^\w\s]/gi, "").trim().slice(0, 100);
-//   };
-  
-//   const sanitizedQuery = sanitizeInput(query);
-//   const sanitizedCampaignName = sanitizeInput(campaignName);
-  
-//   if (!sanitizedQuery || !sanitizedCampaignName) {
-//     console.log("Invalid input after sanitization:", { sanitizedQuery, sanitizedCampaignName });
-//     return res.status(400).json({ error: "Invalid query or campaign name after sanitization" });
-//   }
-  
-//   try {
-//     // Updated log message and function call to use searchGoogle instead of searchGoogleMaps
-//     console.log(`Starting Google search for '${sanitizedQuery}'`);
-//     const businesses = await searchGoogle(sanitizedQuery);
-    
-//     console.log(`Search completed. Found ${businesses?.length || 0} businesses`);
-    
-//     if (!businesses || businesses.length === 0) {
-//       return res.status(404).json({ message: "No businesses found" });
-//     }
-    
-//     const isValidPhoneNumber = (phoneNumber) => {
-//       if (typeof phoneNumber !== "string") return false;
-//       const phoneRegex = /^[+]?[(]?[0-9]{1,4}[)]?[-\s./0-9]*$/;
-//       return phoneRegex.test(phoneNumber);
-//     };
-    
-//     const phoneNumbers = businesses
-//       .map((business) => business.phone || business.phoneNumber)
-//       .filter((phoneNumber) => phoneNumber && isValidPhoneNumber(phoneNumber));
-    
-//     console.log(`Valid phone numbers found: ${phoneNumbers.length}`);
-    
-//     if (!phoneNumbers || phoneNumbers.length === 0) {
-//       return res.status(404).json({ message: "No valid phone numbers found in the scraped data" });
-//     }
-    
-//     const newCampaign = new Campaign({
-//       userId,
-//       campaignName: sanitizedCampaignName,
-//       toolType: "number-scraper",
-//       query: sanitizedQuery,
-//       scrapedNumbers: phoneNumbers,
-//       status: "completed",
-//     });
-    
-//     await newCampaign.save();
-//     console.log(`Campaign saved with ID: ${newCampaign._id}`);
-    
-//     const csvFileName = await saveToCSV(businesses);
-//     if (!csvFileName) {
-//       console.log("Failed to save CSV file");
-//       return res.status(500).json({ error: "Failed to save CSV file" });
-//     }
-    
-//     const csvDownloadUrl = `/api/download?filename=${encodeURIComponent(csvFileName)}`;
-//     console.log(`CSV generated: ${csvFileName}`);
-    
-//     res.status(200).json({
-//       message: "Number scraping completed successfully",
-//       campaignId: newCampaign._id,
-//       businesses,
-//       csvFileName,
-//       csvDownloadUrl,
-//     });
-    
-//   } catch (error) {
-//     console.error("Error in /numberScraper:", error.stack);
-//     res.status(500).json({ error: "An error occurred while scraping numbers", details: process.env.NODE_ENV === 'development' ? error.message : undefined });
-//   }
-// });
-
-// // Secure File Download Endpoint
-// app.get("/api/download", authenticate, (req, res) => {
-//   const { filename } = req.query;
-//   if (!filename) {
-//     return res.status(400).json({ error: "File name is required" });
-//   }
-//   const sanitizedFilename = path.basename(filename);
-//   const filePath = path.join(publicDir, sanitizedFilename);
-//   if (!fs.existsSync(filePath)) {
-//     return res.status(404).json({ error: "File not found" });
-//   }
-//   res.download(filePath, sanitizedFilename, (err) => {
-//     if (err) {
-//       console.error("File download error:", err);
-//       return res.status(500).json({ error: "Failed to download the file" });
-//     }
-//     // Cleanup file after download
-//     fs.unlink(filePath, (unlinkErr) => {
-//       if (unlinkErr) {
-//         console.error("Failed to delete file after download:", filePath, unlinkErr);
-//       }
-//     });
-//   });
-// });
+// Keep the GET endpoint for backward compatibility, redirecting to POST
+app.get("/api/numberScraper", authenticate, (req, res) => {
+  res.status(400).json({ 
+    error: "Method not allowed. Please use POST instead of GET for this endpoint.",
+    code: "METHOD_NOT_ALLOWED"
+  });
+});
+// Secure File Download Endpoint
+app.get("/api/download", authenticate, (req, res) => {
+  const { filename } = req.query;
+  if (!filename) {
+    return res.status(400).json({ error: "File name is required" });
+  }
+  const sanitizedFilename = path.basename(filename);
+  const filePath = path.join(publicDir, sanitizedFilename);
+  if (!fs.existsSync(filePath)) {
+    return res.status(404).json({ error: "File not found" });
+  }
+  res.download(filePath, sanitizedFilename, (err) => {
+    if (err) {
+      console.error("File download error:", err);
+      return res.status(500).json({ error: "Failed to download the file" });
+    }
+    // Cleanup file after download
+    fs.unlink(filePath, (unlinkErr) => {
+      if (unlinkErr) {
+        console.error("Failed to delete file after download:", filePath, unlinkErr);
+      }
+    });
+  });
+});
 
 // Dashboard Endpoint
 app.get("/api/dashboard", authenticate, async (req, res) => {
@@ -263,38 +234,14 @@ app.get("/api/dashboard", authenticate, async (req, res) => {
       userId,
       toolType: "whatsapp-bulk-sender",
     });
-    
-    // Modified aggregation query to properly count emails
     const emailsCollected = await Campaign.aggregate([
       { $match: { userId, toolType: "email-scraper" } },
-      { 
-        $project: {
-          recipientsCount: { $size: { $ifNull: ["$recipients", []] } }
-        }
-      },
-      { 
-        $group: { 
-          _id: null, 
-          total: { $sum: "$recipientsCount" } 
-        } 
-      }
+      { $group: { _id: null, total: { $sum: { $size: "$recipients" } } } },
     ]);
-    
     const phoneNumbers = await Campaign.aggregate([
       { $match: { userId, toolType: "number-scraper" } },
-      { 
-        $project: {
-          numbersCount: { $size: { $ifNull: ["$scrapedNumbers", []] } }
-        }
-      },
-      { 
-        $group: { 
-          _id: null, 
-          total: { $sum: "$numbersCount" } 
-        } 
-      }
+      { $group: { _id: null, total: { $sum: { $size: "$scrapedNumbers" } } } },
     ]);
-    
     const chartData = await Campaign.aggregate([
       { $match: { userId } },
       {
@@ -302,7 +249,7 @@ app.get("/api/dashboard", authenticate, async (req, res) => {
           _id: { $dayOfWeek: "$createdAt" },
           sent: { $sum: 1 },
           opened: { $sum: { $cond: [{ $gt: ["$openRate", 0] }, 1, 0] } },
-        }
+        },
       },
       {
         $project: {
@@ -315,23 +262,20 @@ app.get("/api/dashboard", authenticate, async (req, res) => {
           },
           sent: 1,
           opened: 1,
-        }
+        },
       },
       { $sort: { _id: 1 } },
     ]);
-    
     const recentActivities = await Campaign.find({ userId })
       .sort({ createdAt: -1 })
       .limit(5)
       .select("campaignName status createdAt toolType");
-    
     const user = await User.findById(userId);
     const subscriptionInfo = {
       isPaidUser: user.isPaidUser,
       currentPlan: user.currentPlan,
       subscriptionEndDate: user.subscriptionEndDate,
     };
-    
     res.json({
       stats: {
         emailCampaigns,
@@ -352,6 +296,7 @@ app.get("/api/dashboard", authenticate, async (req, res) => {
     res.status(500).json({ error: "Failed to fetch dashboard data" });
   }
 });
+
 // Health Check Endpoint
 app.get("/health", (req, res) => {
   res.status(200).json({ status: "OK" });
