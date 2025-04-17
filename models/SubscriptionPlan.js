@@ -1,145 +1,24 @@
-const mongoose = require('mongoose');
+const mongoose = require("mongoose");
 
-
-
-
-
-const OrderSchema = new mongoose.Schema({
-
+const subscriptionSchema = new mongoose.Schema({
   userId: {
-
-
-    type: mongoose.Schema.Types.ObjectId,
-
-
-    ref: 'User',
-
-
-    required: true
-
-
-  },
-
-
-  orderId: {
-
-
-    type: String,
-
-
+    type: String, // or mongoose.Schema.Types.ObjectId if using a User collection
     required: true,
-
-
-    unique: true
-
-
+    unique: true  // one subscription record per user
   },
-
-
-  amount: {
-
-
-    type: Number,
-
-
-    required: true
-
-
-  },
-
-
-  planId: {
-
-
+  plan: {
     type: String,
-
-
-    required: true,
-
-
-    enum: ['free', 'starter', 'business', 'enterprise']
-
-
+    enum: ["free", "starter", "business", "enterprise"],
+    default: "free"
   },
-
-
-  duration: {
-
-
-    type: String,
-
-    required: true,
-
-
-    enum: ['1-day', '1-week', '1-month']
-
-  },
-
-
-  status: {
-
-    type: String,
-
-
-    required: true,
-
-
-    enum: ['CREATED', 'PAID', 'FAILED', 'CANCELLED', 'EXPIRED'],
-
-
-    default: 'CREATED'
-
-
-  },
-
-
-  paymentSessionId: {
-
-
-    type: String
-
-  },
-
-
-  createdAt: {
-
+  startDate: {
     type: Date,
-
     default: Date.now
-
   },
-
-
-  updatedAt: {
-
+  endDate: {
     type: Date,
-
-
-    default: Date.now
-
+    default: null
   }
-
 });
 
-
-
-
-// Update the updatedAt field before saving
-
-
-OrderSchema.pre('save', function(next) {
-
-
-  this.updatedAt = Date.now();
-
-
-  next();
-
-
-});
-
-
-
-
-
-module.exports = mongoose.model('Subscription', OrderSchema);
+module.exports = mongoose.model("Subscription", subscriptionSchema);
