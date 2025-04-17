@@ -4,12 +4,25 @@ const { authenticate } = require("../middleware/authMiddleware");
 const subscriptionController = require("../controllers/subscriptionController");
 
 // Create a new subscription order
-router.post("/createOrder", authenticate, subscriptionController.createOrder);
+router.post(
+  "/create-order",
+  authenticate,
+  subscriptionController.createSubscriptionOrder
+);
 
 // Verify payment and activate subscription
-router.get("/verifyPayment/:orderId", authenticate, subscriptionController.verifyPayment);
+// Note: ensure param name matches controller's expectation (orderid)
+router.get(
+  "/verify-payment/:orderid",
+  authenticate,
+  subscriptionController.verifyPayment
+);
 
 // Get current subscription status
-router.get("/status", authenticate, subscriptionController.getSubscriptionStatus);
+router.get(
+  "/status",
+  authenticate,
+  subscriptionController.getSubscriptionStatus
+);
 
 module.exports = router;
