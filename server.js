@@ -51,7 +51,7 @@ app.use((req, res, next) => {
   if (isAuthPath && req.originalUrl.includes("?")) {
     logUrl = req.originalUrl.split("?")[0] + "?[REDACTED]";
   }
-  console.log(${new Date().toISOString()} - ${req.method} ${logUrl});
+  console.log(`${new Date().toISOString()} - ${req.method} ${logUrl}`);
   next();
 });
 
@@ -125,7 +125,7 @@ async function saveToCSV(businesses) {
   });
   try {
     await csvWriter.writeRecords(businesses);
-    console.log(The CSV file "${csvFilePath}" was written successfully.);
+    console.log(`The CSV file "${csvFilePath}" was written successfully.`);
     return csvFileName;
   } catch (error) {
     console.error("Error writing CSV file:", error.message);
@@ -384,12 +384,12 @@ if (fs.existsSync(SSL_KEY_PATH) && fs.existsSync(SSL_CERT_PATH)) {
   };
 
   https.createServer(sslOptions, app).listen(PORT, () => {
-    console.log(HTTPS Server running on https://vedive.com:${PORT});
+    console.log(`HTTPS Server running on https://vedive.com:${PORT}`);
     checkExpiredSubscriptions();
   });
 } else {
   console.warn("SSL certificate files not found. Starting server in HTTP mode.");
   http.createServer(app).listen(PORT, () => {
-    console.log(HTTP Server running on port ${PORT});
+    console.log(`HTTP Server running on port ${PORT}`);
     checkExpiredSubscriptions();
   });
