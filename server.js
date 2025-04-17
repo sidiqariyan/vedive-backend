@@ -263,14 +263,38 @@ app.get("/api/dashboard", authenticate, async (req, res) => {
       userId,
       toolType: "whatsapp-bulk-sender",
     });
+    
+    // Modified aggregation query to properly count emails
     const emailsCollected = await Campaign.aggregate([
       { $match: { userId, toolType: "email-scraper" } },
-      { $group: { _id: null, total: { $sum: { $size: "$recipients" } } } },
+      { 
+        $project: {
+          recipientsCount: { $size: { $ifNull: ["$recipients", []] } }
+        }
+      },
+      { 
+        $group: { 
+          _id: null, 
+          total: { $sum: "$recipientsCount" } 
+        } 
+      }
     ]);
+    
     const phoneNumbers = await Campaign.aggregate([
       { $match: { userId, toolType: "number-scraper" } },
-      { $group: { _id: null, total: { $sum: { $size: "$scrapedNumbers" } } } },
+      { 
+        $project: {
+          numbersCount: { $size: { $ifNull: ["$scrapedNumbers", []] } }
+        }
+      },
+      { 
+        $group: { 
+          _id: null, 
+          total: { $sum: "$numbersCount" } 
+        } 
+      }
     ]);
+    
     const chartData = await Campaign.aggregate([
       { $match: { userId } },
       {
@@ -278,7 +302,7 @@ app.get("/api/dashboard", authenticate, async (req, res) => {
           _id: { $dayOfWeek: "$createdAt" },
           sent: { $sum: 1 },
           opened: { $sum: { $cond: [{ $gt: ["$openRate", 0] }, 1, 0] } },
-        },
+        }
       },
       {
         $project: {
@@ -291,20 +315,23 @@ app.get("/api/dashboard", authenticate, async (req, res) => {
           },
           sent: 1,
           opened: 1,
-        },
+        }
       },
       { $sort: { _id: 1 } },
     ]);
+    
     const recentActivities = await Campaign.find({ userId })
       .sort({ createdAt: -1 })
       .limit(5)
       .select("campaignName status createdAt toolType");
+    
     const user = await User.findById(userId);
     const subscriptionInfo = {
       isPaidUser: user.isPaidUser,
       currentPlan: user.currentPlan,
       subscriptionEndDate: user.subscriptionEndDate,
     };
+    
     res.json({
       stats: {
         emailCampaigns,
@@ -325,7 +352,6 @@ app.get("/api/dashboard", authenticate, async (req, res) => {
     res.status(500).json({ error: "Failed to fetch dashboard data" });
   }
 });
-
 // Health Check Endpoint
 app.get("/health", (req, res) => {
   res.status(200).json({ status: "OK" });
