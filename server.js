@@ -22,7 +22,7 @@ const app = express();
 const publicDir = path.join(__dirname, "public");
 if (!fs.existsSync(publicDir)) {
   fs.mkdirSync(publicDir, { recursive: true });
-  console.log(Created public directory: ${publicDir});
+  console.log(`Created public directory: ${publicDir}`);
 }
 
 // Connect to MongoDB
