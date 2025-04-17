@@ -342,7 +342,7 @@ app.get("/api/dashboard", authenticate, async (req, res) => {
       chartData,
       subscriptionInfo,
       recentActivities: recentActivities.map((a) => ({
-        description: ${a.campaignName} (${a.status}),
+        description: `${a.campaignName} (${a.status})`,
         time: new Date(a.createdAt).toLocaleString(),
         type: a.toolType,
       })),
