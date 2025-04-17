@@ -11,7 +11,7 @@ const planDetails = {
   enterprise: { price: 699, duration: 30 * 24 * 60 * 60 * 1000, label: "1-month" }
 };
 
-// 1) Create an order on Cashfree
+// Create an order on Cashfree
 const createSubscriptionOrder = async (req, res) => {
   try {
     const { planId, email, phone, name, userId } = req.body;
@@ -74,11 +74,10 @@ const createSubscriptionOrder = async (req, res) => {
   }
 };
 
-
-// 2) Verify payment & activate/update subscription
+// Verify payment & activate subscription
 const verifyPayment = async (req, res) => {
   try {
-    const orderid    = req.params.orderid;
+    const orderid    = req.params.orderId;
     const orderToken = req.query.order_token;
     const userId     = req.query.userId;
     const planId     = req.query.planId || "starter";
@@ -91,13 +90,8 @@ const verifyPayment = async (req, res) => {
       });
     }
 
-    const selectedPlan = planDetails[planId] || {
-      price: 1,
-      duration: 1 * 24 * 60 * 60 * 1000,
-      label: "1-day"
-    };
+    const selectedPlan = planDetails[planId] || { price: 1, duration: 1 * 24 * 60 * 60 * 1000, label: "1-day" };
 
-    // Fetch order status from Cashfree
     let url = `https://sandbox.cashfree.com/pg/orders/${orderid}`;
     if (orderToken) url += `?order_token=${orderToken}`;
 
@@ -116,13 +110,9 @@ const verifyPayment = async (req, res) => {
     const orderStatus = response.data.order_status;
 
     if (orderStatus === "PAID" || orderStatus === "SUCCESS") {
-      // Try to find existing subscription
-      let sub = await Subscription.findOne({
-        userId: mongoose.Types.ObjectId(userId)
-      });
-
-      const now       = new Date();
-      const newEnd    = new Date(now.getTime() + selectedPlan.duration);
+      let sub = await Subscription.findOne({ userId: mongoose.Types.ObjectId(userId) });
+      const now    = new Date();
+      const newEnd = new Date(now.getTime() + selectedPlan.duration);
 
       if (!sub) {
         sub = new Subscription({
@@ -146,49 +136,39 @@ const verifyPayment = async (req, res) => {
 
       await sub.save();
 
-      res.status(200).json({
+      return res.status(200).json({
         success: true,
         message: "Payment verified and subscription activated.",
         orderStatus,
         subscription: sub,
         data: response.data
       });
-
-    } else {
-      res.status(200).json({
-        success: false,
-        message: "Payment not completed.",
-        orderStatus,
-        data: response.data
-      });
     }
+
+    res.status(200).json({
+      success: false,
+      message: "Payment not completed.",
+      orderStatus,
+      data: response.data
+    });
 
   } catch (error) {
     console.error("Error in verifyPayment:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
-
-// 3) Get current subscription status (and auto‑expire if past endDate)
+// Get current subscription status
 const getSubscriptionStatus = async (req, res) => {
   try {
     const userId = req.query.userId;
-
     if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid or missing userId"
-      });
+      return res.status(400).json({ success: false, message: "Invalid or missing userId" });
     }
 
     const oid = mongoose.Types.ObjectId(userId);
     let subscription = await Subscription.findOne({ userId: oid });
 
-    // If expired, downgrade to "free"
     if (subscription && subscription.endDate && Date.now() > subscription.endDate.getTime()) {
       subscription.planId    = "free";
       subscription.startDate = new Date();
@@ -207,16 +187,13 @@ const getSubscriptionStatus = async (req, res) => {
 
   } catch (error) {
     console.error("Error in getSubscriptionStatus:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
-
 module.exports = {
   createSubscriptionOrder,
+  createOrder: createSubscriptionOrder, // alias for routes using createOrder
   verifyPayment,
   getSubscriptionStatus
 };
