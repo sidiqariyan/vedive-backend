@@ -4,12 +4,7 @@ const { authenticate } = require("../middleware/authMiddleware");
 const subscriptionController = require("../controllers/subscriptionController");
 
 // Create a new subscription order
-router.post(
-  "/create-order",
-  authenticate,
-  subscriptionController.createSubscriptionOrder
-);
-
+router.post("/createOrder", authenticate, subscriptionController.createSubscriptionOrder);
 // Verify payment and activate subscription
 // Note: ensure param name matches controller's expectation (orderid)
 router.get(
