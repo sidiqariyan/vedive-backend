@@ -1,23 +1,15 @@
+// backend/routes/subscriptionRoute.js
 const express = require("express");
 const router = express.Router();
-const { authenticate } = require("../middleware/authMiddleware");
-const subscriptionController = require("../controllers/subscriptionController");
+const { createSubscriptionOrder, verifyPayment, getSubscriptionStatus } = require("../controllers/subscriptionController");
 
-// Create a new subscription order
-router.post("/createOrder", authenticate, subscriptionController.createSubscriptionOrder);
-// Verify payment and activate subscription
-// Note: ensure param name matches controller's expectation (orderid)
-router.get(
-  "/verify-payment/:orderid",
-  authenticate,
-  subscriptionController.verifyPayment
-);
+// POST /api/subscription/createOrder -> Create subscription order
+router.post("/createOrder", createSubscriptionOrder);
 
-// Get current subscription status
-router.get(
-  "/status",
-  authenticate,
-  subscriptionController.getSubscriptionStatus
-);
+// GET /api/subscription/verifyPayment/:orderid -> Verify subscription payment
+router.get("/verifyPayment/:orderid", verifyPayment);
+
+// GET /api/subscription/status -> Get current subscription status
+router.get("/status", getSubscriptionStatus);
 
 module.exports = router;
