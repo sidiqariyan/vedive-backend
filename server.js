@@ -80,7 +80,7 @@ const subscriptionRoute = require("./routes/subscriptionRoutes");
 app.use("/api/blog", require("./routes/blogRoute"));
 app.use("/api/payment", cashfreeRoute);
 app.use("/api/subscription", subscriptionRoute);
-
+const { handleEmailScraper } = require("./routes/scraper");
 // Updated Email Scraper Endpoint
 app.post("/api/email-scraper", authenticate, async (req, res) => {
   try {
