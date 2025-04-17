@@ -4,7 +4,9 @@ const { authenticate } = require("../middleware/authMiddleware");
 const subscriptionController = require("../controllers/subscriptionController");
 
 // Create a new subscription order
-router.post("/createOrder", authenticate, subscriptionController.createSubscriptionOrder);
+// cashfreeRoute.js
+router.post("/createOrder", authenticate, subscriptionController.createOrder);
+
 
 // Verify payment and activate subscription 
 router.post("/verifyPayment/:orderid", authenticate, subscriptionController.verifyPayment);
