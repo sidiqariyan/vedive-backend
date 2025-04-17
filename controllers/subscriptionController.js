@@ -164,7 +164,8 @@ const getSubscriptionStatus = async (req, res) => {
 };
 
 module.exports = {
-  createSubscriptionOrder,
+  // alias it so your route stays the same:
+  createOrder: createSubscriptionOrder,
   verifyPayment,
   getSubscriptionStatus
 };
