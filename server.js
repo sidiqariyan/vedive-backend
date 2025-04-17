@@ -102,36 +102,36 @@ app.post("/api/email-scraper", authenticate, async (req, res) => {
 });
 
 // Function to save scraped data to CSV
-async function saveToCSV(businesses) {
-  if (!Array.isArray(businesses) || businesses.length === 0) {
-    console.error("No businesses data to save.");
-    return null;
-  }
-  const csvFileName = businesses_${uuidv4()}.csv;
-  const csvFilePath = path.join(publicDir, csvFileName);
-  const csvWriter = createCsvWriter({
-    path: csvFilePath,
-    header: [
-      { id: "index", title: "Index" },
-      { id: "storeName", title: "Store Name" },
-      { id: "placeId", title: "Place ID" },
-      { id: "address", title: "Address" },
-      { id: "category", title: "Category" },
-      { id: "phone", title: "Phone" },
-      { id: "googleUrl", title: "Google URL" },
-      { id: "bizWebsite", title: "Business Website" },
-      { id: "ratingText", title: "Rating" },
-    ],
-  });
-  try {
-    await csvWriter.writeRecords(businesses);
-    console.log(`The CSV file "${csvFilePath}" was written successfully.`);
-    return csvFileName;
-  } catch (error) {
-    console.error("Error writing CSV file:", error.message);
-    return null;
-  }
-}
+// async function saveToCSV(businesses) {
+//   if (!Array.isArray(businesses) || businesses.length === 0) {
+//     console.error("No businesses data to save.");
+//     return null;
+//   }
+//   const csvFileName = businesses_${uuidv4()}.csv;
+//   const csvFilePath = path.join(publicDir, csvFileName);
+//   const csvWriter = createCsvWriter({
+//     path: csvFilePath,
+//     header: [
+//       { id: "index", title: "Index" },
+//       { id: "storeName", title: "Store Name" },
+//       { id: "placeId", title: "Place ID" },
+//       { id: "address", title: "Address" },
+//       { id: "category", title: "Category" },
+//       { id: "phone", title: "Phone" },
+//       { id: "googleUrl", title: "Google URL" },
+//       { id: "bizWebsite", title: "Business Website" },
+//       { id: "ratingText", title: "Rating" },
+//     ],
+//   });
+//   try {
+//     await csvWriter.writeRecords(businesses);
+//     console.log(`The CSV file "${csvFilePath}" was written successfully.`);
+//     return csvFileName;
+//   } catch (error) {
+//     console.error("Error writing CSV file:", error.message);
+//     return null;
+//   }
+// }
 
 // app.post("/api/numberScraper", authenticate, async (req, res) => {
 //   console.log("====== Number Scraper Endpoint Accessed ======");
