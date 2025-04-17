@@ -14,20 +14,13 @@ const planDetails = {
 // Create an order on Cashfree
 const createSubscriptionOrder = async (req, res) => {
   try {
-    const { planId, email, phone, name, userId } = req.body;
+    const { planId, email, phone, name } = req.body;
+    const userId = req.user._id; // from authenticate middleware
 
-    // Validate userId
-    if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid or missing userId"
-      });
-    }
-
-    const orderId    = "ORID" + Date.now();
-    const customerId = "CID"  + Date.now();
     const selectedPlan = planDetails[planId] || { price: 1 };
-    const orderAmount  = selectedPlan.price;
+    const orderAmount = selectedPlan.price;
+    const orderId     = "ORID" + Date.now();
+    const customerId  = "CID"  + Date.now();
 
     const options = {
       method: "POST",
@@ -42,9 +35,9 @@ const createSubscriptionOrder = async (req, res) => {
       data: {
         customer_details: {
           customer_id:    customerId,
-          customer_email: email || "customer@example.com",
-          customer_phone: phone || "1234567890",
-          customer_name:  name  || "Customer Name"
+          customer_email: email || req.user.email || "customer@example.com",
+          customer_phone: phone || req.user.phone || "1234567890",
+          customer_name:  name  || req.user.name || "Customer"
         },
         order_meta: {
           notify_url:      process.env.CASHFREE_NOTIFY_URL || "https://your-notify-url.com",
@@ -67,32 +60,20 @@ const createSubscriptionOrder = async (req, res) => {
 
   } catch (error) {
     console.error("Error in createSubscriptionOrder:", error);
-    res.status(500).json({
-      success: false,
-      message: error.message
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
 // Verify payment & activate subscription
 const verifyPayment = async (req, res) => {
   try {
-    const orderid    = req.params.orderId;
+    const orderId    = req.params.orderId;
     const orderToken = req.query.order_token;
-    const userId     = req.query.userId;
-    const planId     = req.query.planId || "starter";
-
-    // Validate userId
-    if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
-      return res.status(400).json({
-        success: false,
-        message: "Invalid or missing userId"
-      });
-    }
+    const userId     = req.user._id;
+    const planId     = req.query.planId || req.body.planId || "starter";
 
     const selectedPlan = planDetails[planId] || { price: 1, duration: 1 * 24 * 60 * 60 * 1000, label: "1-day" };
-
-    let url = `https://sandbox.cashfree.com/pg/orders/${orderid}`;
+    let url = `https://sandbox.cashfree.com/pg/orders/${orderId}`;
     if (orderToken) url += `?order_token=${orderToken}`;
 
     const options = {
@@ -108,17 +89,16 @@ const verifyPayment = async (req, res) => {
 
     const response    = await axios.request(options);
     const orderStatus = response.data.order_status;
+    const now         = new Date();
+    const newEnd      = new Date(now.getTime() + selectedPlan.duration);
 
+    let sub = await Subscription.findOne({ userId: mongoose.Types.ObjectId(userId) });
     if (orderStatus === "PAID" || orderStatus === "SUCCESS") {
-      let sub = await Subscription.findOne({ userId: mongoose.Types.ObjectId(userId) });
-      const now    = new Date();
-      const newEnd = new Date(now.getTime() + selectedPlan.duration);
-
       if (!sub) {
         sub = new Subscription({
           userId:    mongoose.Types.ObjectId(userId),
           planId,
-          orderId:   orderid,
+          orderId,
           amount:    selectedPlan.price,
           duration:  selectedPlan.label,
           status:    orderStatus,
@@ -133,24 +113,12 @@ const verifyPayment = async (req, res) => {
         sub.startDate = now;
         sub.endDate   = newEnd;
       }
-
       await sub.save();
-
-      return res.status(200).json({
-        success: true,
-        message: "Payment verified and subscription activated.",
-        orderStatus,
-        subscription: sub,
-        data: response.data
-      });
+      return res.status(200).json({ success: true, message: "Payment verified and subscription activated.", orderStatus, subscription: sub, data: response.data });
     }
 
-    res.status(200).json({
-      success: false,
-      message: "Payment not completed.",
-      orderStatus,
-      data: response.data
-    });
+    // payment not completed
+    res.status(200).json({ success: false, message: "Payment not completed.", orderStatus, data: response.data });
 
   } catch (error) {
     console.error("Error in verifyPayment:", error);
@@ -161,14 +129,8 @@ const verifyPayment = async (req, res) => {
 // Get current subscription status
 const getSubscriptionStatus = async (req, res) => {
   try {
-    const userId = req.query.userId;
-    if (!userId || !mongoose.Types.ObjectId.isValid(userId)) {
-      return res.status(400).json({ success: false, message: "Invalid or missing userId" });
-    }
-
-    const oid = mongoose.Types.ObjectId(userId);
-    let subscription = await Subscription.findOne({ userId: oid });
-
+    const userId = req.user._id;
+    let subscription = await Subscription.findOne({ userId: mongoose.Types.ObjectId(userId) });
     if (subscription && subscription.endDate && Date.now() > subscription.endDate.getTime()) {
       subscription.planId    = "free";
       subscription.startDate = new Date();
@@ -177,14 +139,7 @@ const getSubscriptionStatus = async (req, res) => {
       subscription.duration  = "1-day";
       await subscription.save();
     }
-
-    res.status(200).json({
-      success: true,
-      hasActiveSubscription: subscription ? subscription.planId !== "free" : false,
-      currentPlan:           subscription ? subscription.planId : "free",
-      subscription
-    });
-
+    res.status(200).json({ success: true, hasActiveSubscription: subscription ? subscription.planId !== "free" : false, currentPlan: subscription ? subscription.planId : "free", subscription });
   } catch (error) {
     console.error("Error in getSubscriptionStatus:", error);
     res.status(500).json({ success: false, message: error.message });
@@ -193,7 +148,7 @@ const getSubscriptionStatus = async (req, res) => {
 
 module.exports = {
   createSubscriptionOrder,
-  createOrder: createSubscriptionOrder, // alias for routes using createOrder
+  createOrder: createSubscriptionOrder, // alias
   verifyPayment,
   getSubscriptionStatus
 };
