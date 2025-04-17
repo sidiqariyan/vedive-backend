@@ -6,7 +6,7 @@ const subscriptionController = require("../controllers/subscriptionController");
 // Create a new subscription order
 router.post("/createOrder", authenticate, subscriptionController.createSubscriptionOrder);
 
-// Verify payment and activate subscription
+// Verify payment and activate subscription 
 router.post("/verifyPayment/:orderid", authenticate, subscriptionController.verifyPayment);
 
 // Get current subscription status
