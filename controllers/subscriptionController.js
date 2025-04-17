@@ -16,7 +16,15 @@ const createSubscriptionOrder = async (req, res) => {
     const customerId = "CID" + Date.now();
 
     // Use the provided amount or fallback to the mapped price
-    const orderAmount = amount || planPrices[planId] || 1;
+   // after
+const orderAmount = planPrices[planId];
+if (!orderAmount) {
+  return res.status(400).json({
+    success: false,
+    message: `Invalid planId "${planId}" – must be one of ${Object.keys(planPrices).join(', ')}`
+  });
+}
+
 
     const options = {
       method: "POST",
