@@ -10,25 +10,8 @@ const pLimit = require("p-limit");
 const { scrapeEmails } = require("../services/scrapeService");
 const { generateCSV } = require("../utils/csvWriter");
 
-// Utility function to parse array fields (if needed)
-const parseArrayField = (field, fieldName) => {
-  if (Array.isArray(field)) return field;
-  if (typeof field === "string" && field.trim()) {
-    try {
-      const parsed = JSON.parse(field);
-      if (!Array.isArray(parsed)) {
-        throw new Error(`Parsed ${fieldName} must be an array`);
-      }
-      return parsed;
-    } catch (error) {
-      throw new Error(`Invalid ${fieldName} format. Must be a valid JSON array string.`);
-    }
-  }
-  return [];
-};
-
-// API endpoint to scrape emails WITHOUT authentication
-router.post("/scrape-emails", async (req, res) => {
+// Handler function for email scraper that can be used by multiple routes
+const handleEmailScraper = async (req, res) => {
   try {
     const { query, pages = 2, domains, campaignName, userId } = req.body;
 
@@ -46,9 +29,8 @@ router.post("/scrape-emails", async (req, res) => {
       return res.status(400).json({ error: "Domains must be an array" });
     }
 
-    // Use userId from request body instead of authenticated user
-    // If userId is not provided, use a default value (anonymous)
-    const userIdentifier = userId || "anonymous";
+    // Use userId from authenticated user or from request body
+    const userIdentifier = req.user?._id || userId || "anonymous";
 
     // Get API keys from environment variables
     const apiKey = process.env.GOOGLE_API_KEY;
@@ -115,8 +97,8 @@ router.post("/scrape-emails", async (req, res) => {
       return res.status(404).json({ message: "No valid emails found for this query. Try different keywords or parameters." });
     }
 
-    // Save the campaign if a valid userId is provided
-    if (userId) {
+    // Save the campaign
+    if (userIdentifier && userIdentifier !== "anonymous") {
       const newCampaign = new Campaign({
         userId: userIdentifier,
         campaignName,
@@ -131,7 +113,7 @@ router.post("/scrape-emails", async (req, res) => {
       console.log("No userId provided, skipping campaign creation");
     }
 
-    // Generate CSV file with the valid emails (pass array of strings directly)
+    // Generate CSV file with the valid emails
     const csvPath = await generateCSV(validEmails);
     if (!csvPath) {
       return res.status(500).json({ error: "Failed to generate CSV file" });
@@ -160,11 +142,18 @@ router.post("/scrape-emails", async (req, res) => {
       }
     });
   } catch (error) {
-    console.error("Error in /scrape-emails:", error);
+    console.error("Error in email scraper:", error);
     if (!res.headersSent) {
       res.status(500).json({ error: error.message || "An error occurred during email scraping" });
     }
   }
+};
+
+// API endpoint to scrape emails WITHOUT authentication
+router.post("/scrape-emails", async (req, res) => {
+  return await handleEmailScraper(req, res);
 });
 
+// Export both the router and the handler function
 module.exports = router;
+module.exports.handleEmailScraper = handleEmailScraper;
