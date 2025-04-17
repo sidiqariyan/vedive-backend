@@ -1,12 +1,15 @@
-// backend/routes/cashfreeRoute.js
 const express = require("express");
 const router = express.Router();
-const { newOrderId, checkStatus } = require("../controllers/paymentController");
+const { authenticate } = require("../middleware/authMiddleware");
+const subscriptionController = require("../controllers/subscriptionController");
 
-// POST /api/payment/create -> Create a new order
-router.post("/create", newOrderId);
+// Create a new subscription order
+router.post("/createOrder", authenticate, subscriptionController.createOrder);
 
-// GET /api/payment/status/:orderid -> Check order status
-router.get("/status/:orderid", checkStatus);
+// Verify payment and activate subscription
+router.get("/verifyPayment/:orderId", authenticate, subscriptionController.verifyPayment);
+
+// Get current subscription status
+router.get("/status", authenticate, subscriptionController.getSubscriptionStatus);
 
 module.exports = router;
