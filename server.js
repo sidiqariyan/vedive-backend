@@ -34,7 +34,7 @@ app.use(helmet());
 // Use CORS middleware to allow requests from any origin
 app.use(
   cors({
-    origin: true,
+    origin: "*",
     methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
     allowedHeaders: ["Content-Type", "Authorization"],
     credentials: true,
