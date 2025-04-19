@@ -1,4 +1,3 @@
-// backend/routes/subscriptionRoute.js
 const express = require("express");
 const router = express.Router();
 const {
@@ -16,21 +15,32 @@ router.use((req, res, next) => {
 });
 
 // POST /api/subscription/createOrder -> Create subscription order
-router.post("/createOrder", (req, res, next) => {
-  const { planId, customerName } = req.body;
-  if (!planId || !customerName) {
-    return res.status(400).json({
-      success: false,
-      message: "Missing required fields: planId and customerName are required.",
-    });
-  }
-  next();
-}, createSubscriptionOrder);
+router.post(
+  "/createOrder",
+  // Validate required fields: only planId is mandatory here
+  (req, res, next) => {
+    const { planId } = req.body;
+    if (!planId) {
+      return res.status(400).json({
+        success: false,
+        message: "Missing required field: planId is required.",
+      });
+    }
+    next();
+  },
+  createSubscriptionOrder
+);
 
 // GET /api/subscription/verifyPayment/:orderid -> Verify subscription payment
-router.get("/verifyPayment/:orderid", verifyPayment);
+router.get(
+  "/verifyPayment/:orderid",
+  verifyPayment
+);
 
 // GET /api/subscription/status -> Get current subscription status
-router.get("/status", getSubscriptionStatus);
+router.get(
+  "/status",
+  getSubscriptionStatus
+);
 
 module.exports = router;
