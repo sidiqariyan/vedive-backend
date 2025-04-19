@@ -61,34 +61,9 @@ const verifyPayment = async (req, res) => {
   const orderid = req.params.orderid;
   const orderToken = req.query.order_token;
   const userId = req.query.userId || "user123";
-  const planId = req.query.plan_id || "free"; // Extract planId from query parameters
-
-  console.log("Plan ID from query:", planId);
-
-  let planDuration = 0;
-  switch (planId) {
-    case "free":
-      planDuration = 0; // No expiry for free plan
-      break;
-    case "starter":
-      planDuration = 1 * 24 * 60 * 60 * 1000; // 1 day
-      break;
-    case "business":
-      planDuration = 7 * 24 * 60 * 60 * 1000; // 1 week
-      break;
-    case "enterprise":
-      planDuration = 30 * 24 * 60 * 60 * 1000; // 1 month
-      break;
-    default:
-      console.error("Invalid planId:", planId);
-      planDuration = 0; // Free plan – no expiry
-      break;
-  }
-
-  console.log(`Plan ID: ${planId}`);
-  console.log(`Calculated Plan Duration: ${planDuration}`);
 
   try {
+    // Fetch order details from Cashfree
     let url = `https://sandbox.cashfree.com/pg/orders/${orderid}`;
     if (orderToken) {
       url += `?order_token=${orderToken}`;
@@ -106,7 +81,44 @@ const verifyPayment = async (req, res) => {
 
     const response = await axios.request(options);
     console.log("Cashfree response data:", response.data);
+
     const orderStatus = response.data.order_status;
+    const orderAmount = response.data.order_amount;
+
+    // Map order amount to plan ID
+    let planId = "free"; // Default to free plan
+    if (orderAmount === 49) {
+      planId = "starter";
+    } else if (orderAmount === 199) {
+      planId = "business";
+    } else if (orderAmount === 699) {
+      planId = "enterprise";
+    }
+
+    console.log(`Plan ID from order amount: ${planId}`);
+
+    // Calculate plan duration
+    let planDuration = 0;
+    switch (planId) {
+      case "free":
+        planDuration = 0; // No expiry for free plan
+        break;
+      case "starter":
+        planDuration = 1 * 24 * 60 * 60 * 1000; // 1 day
+        break;
+      case "business":
+        planDuration = 7 * 24 * 60 * 60 * 1000; // 1 week
+        break;
+      case "enterprise":
+        planDuration = 30 * 24 * 60 * 60 * 1000; // 1 month
+        break;
+      default:
+        console.error("Invalid planId:", planId);
+        planDuration = 0; // Free plan – no expiry
+        break;
+    }
+
+    console.log(`Calculated Plan Duration: ${planDuration}`);
 
     if (orderStatus === "PAID" || orderStatus === "SUCCESS") {
       let sub = await Subscription.findOne({ userId });
