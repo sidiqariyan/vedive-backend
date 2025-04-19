@@ -32,7 +32,7 @@ connectDB();
 app.use(helmet());
 
 // Use CORS middleware to allow requests from any origin
-pp.use(cors({
+app.use(cors({
   origin: ['http://localhost:5173', 'https://vedive.com', 'http://vedive.com'],
   credentials: true,
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
