@@ -8,10 +8,12 @@ const planPrices = {
   business: 199,
   enterprise: 699,
 };
+
+// Fix: Update the plan durations to match what's displayed in the frontend
 const planDurations = {
-  starter: 1 * 24 * 60 * 60 * 1000,      // 1 day
-  business: 7 * 24 * 60 * 60 * 1000,     // 1 week
-  enterprise: 30 * 24 * 60 * 60 * 1000,   // 1 month
+  starter: 1 * 24 * 60 * 60 * 1000,      // 1 day (as shown in frontend)
+  business: 7 * 24 * 60 * 60 * 1000,     // 1 week (as shown in frontend)
+  enterprise: 30 * 24 * 60 * 60 * 1000,  // 1 month (as shown in frontend)
 };
 
 // POST /api/subscription/createOrder
@@ -95,11 +97,17 @@ const verifyPayment = async (req, res) => {
     const response = await axios.request(options);
     const orderStatus = response.data.order_status;
 
+    // Extract userId from JWT token if not provided in query params
+    if (!userId && req.user) {
+      userId = req.user.id;
+    }
+
     // Infer planId from the order_note if not provided
     if (!planId && response.data.order_note) {
       const match = response.data.order_note.match(/plan\s+(\w+)$/i);
       if (match) planId = match[1].toLowerCase();
     }
+    
     if (!planId) {
       return res.status(400).json({ success: false, message: "planId is required" });
     }
@@ -118,6 +126,8 @@ const verifyPayment = async (req, res) => {
       let sub = await Subscription.findOne({ userId });
       const start = new Date();
       const end = new Date(Date.now() + planDuration);
+      
+      console.log(`Activating ${planId} subscription for user ${userId} until ${end.toISOString()}`);
 
       if (!sub) {
         sub = new Subscription({ userId, plan: planId, startDate: start, endDate: end });
@@ -147,20 +157,33 @@ const verifyPayment = async (req, res) => {
 
 // GET /api/subscription/status
 const getSubscriptionStatus = async (req, res) => {
-  const userId = req.query.userId || "user123";
-  let subscription = await Subscription.findOne({ userId });
-  if (subscription && subscription.endDate && new Date() > subscription.endDate) {
-    subscription.plan = "free";
-    subscription.startDate = new Date();
-    subscription.endDate = null;
-    await subscription.save();
+  try {
+    const userId = req.user?.id || req.query.userId;
+    
+    if (!userId) {
+      return res.status(401).json({ success: false, message: "Unauthorized" });
+    }
+    
+    let subscription = await Subscription.findOne({ userId });
+    
+    // Check if subscription has expired
+    if (subscription && subscription.endDate && new Date() > new Date(subscription.endDate)) {
+      subscription.plan = "free";
+      subscription.startDate = new Date();
+      subscription.endDate = null;
+      await subscription.save();
+    }
+    
+    return res.status(200).json({
+      success: true,
+      hasActiveSubscription: subscription ? subscription.plan !== "free" : false,
+      currentPlan: subscription ? subscription.plan : "free",
+      subscription
+    });
+  } catch (error) {
+    console.error("Error in getSubscriptionStatus:", error.message);
+    return res.status(500).json({ success: false, message: error.message });
   }
-  return res.status(200).json({
-    success: true,
-    hasActiveSubscription: subscription ? subscription.plan !== "free" : false,
-    currentPlan: subscription ? subscription.plan : "free",
-    subscription
-  });
 };
 
 module.exports = {
