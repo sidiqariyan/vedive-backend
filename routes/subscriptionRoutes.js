@@ -1,42 +1,36 @@
-const express = require('express');
+// backend/routes/subscriptionRoute.js
+const express = require("express");
 const router = express.Router();
-const { authenticate } = require('../middleware/authMiddleware');
+const {
+  createSubscriptionOrder,
+  verifyPayment,
+  getSubscriptionStatus,
+} = require("../controllers/subscriptionController");
 
-// Your subscription service or model import
-const SubscriptionService = require('../services/subscriptionService');
-
-// POST /api/subscription/createOrder
-router.post('/createOrder', authenticate, async (req, res) => {
-  // 1. Debug: log incoming payload
-  console.log('⚙️  createOrder payload:', JSON.stringify(req.body, null, 2));
-
-  // 2. Destructure required fields
-  const { planId, couponCode, customerName } = req.body;
-
-  // 3. Validate required fields with clear errors
-  if (!planId) {
-    return res.status(400).json({ error: 'Missing required field: planId' });
+// Middleware to log and validate JSON input
+router.use((req, res, next) => {
+  if (req.method === "POST" || req.method === "PUT") {
+    console.log("Incoming Request Body:", req.body);
   }
-  if (!customerName) {
-    return res.status(400).json({ error: 'Missing required field: customerName' });
-  }
-
-  try {
-    // 4. Call your business logic / service layer
-    const order = await SubscriptionService.createOrder({
-      userId: req.user._id,
-      planId,
-      couponCode,
-      customerName,
-    });
-
-    // 5. Return success
-    return res.status(200).json({ message: 'Order created', order });
-  } catch (err) {
-    console.error('❌ createOrder error:', err.stack || err);
-    // In prod, you might omit `details`
-    return res.status(500).json({ error: 'Failed to create order', details: err.message });
-  }
+  next();
 });
+
+// POST /api/subscription/createOrder -> Create subscription order
+router.post("/createOrder", (req, res, next) => {
+  const { planId, customerName } = req.body;
+  if (!planId || !customerName) {
+    return res.status(400).json({
+      success: false,
+      message: "Missing required fields: planId and customerName are required.",
+    });
+  }
+  next();
+}, createSubscriptionOrder);
+
+// GET /api/subscription/verifyPayment/:orderid -> Verify subscription payment
+router.get("/verifyPayment/:orderid", verifyPayment);
+
+// GET /api/subscription/status -> Get current subscription status
+router.get("/status", getSubscriptionStatus);
 
 module.exports = router;
