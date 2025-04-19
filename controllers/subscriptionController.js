@@ -71,7 +71,7 @@ const verifyPayment = async (req, res) => {
   let planDuration = 0;
   switch (planId) {
     case "starter":
-      planDuration = 24 * 60 * 60 * 1000; // 1 day
+      planDuration = 1 * 24 * 60 * 60 * 1000; // 1 day
       break;
     case "business":
       planDuration = 7 * 24 * 60 * 60 * 1000; // 1 week
