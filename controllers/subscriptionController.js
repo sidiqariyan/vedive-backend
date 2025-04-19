@@ -61,7 +61,9 @@ const verifyPayment = async (req, res) => {
   const orderid = req.params.orderid;
   const orderToken = req.query.order_token;
   const userId = req.query.userId || "user123";
-  const planId = req.query.planId || "starter";
+  const planId = req.query.planId || "starter"; // Default to "starter" if not provided
+
+  console.log("Plan ID from query:", planId);
 
   let planDuration = 0;
   switch (planId) {
@@ -75,7 +77,8 @@ const verifyPayment = async (req, res) => {
       planDuration = 30 * 24 * 60 * 60 * 1000; // 1 month
       break;
     default:
-      planDuration = 0; // free plan – no expiry
+      console.error("Invalid planId:", planId);
+      planDuration = 0; // Free plan – no expiry
       break;
   }
 
