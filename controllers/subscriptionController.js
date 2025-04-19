@@ -61,12 +61,15 @@ const verifyPayment = async (req, res) => {
   const orderid = req.params.orderid;
   const orderToken = req.query.order_token;
   const userId = req.query.userId || "user123";
-  const planId = req.query.planId || "starter"; // Default to "starter" if not provided
+  const planId = req.query.plan_id || "starter"; // Extract planId from query parameters
 
   console.log("Plan ID from query:", planId);
 
   let planDuration = 0;
   switch (planId) {
+    case "free":
+      planDuration = 0; // No expiry for free plan
+      break;
     case "starter":
       planDuration = 1 * 24 * 60 * 60 * 1000; // 1 day
       break;
