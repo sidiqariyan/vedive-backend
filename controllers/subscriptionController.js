@@ -79,6 +79,9 @@ const verifyPayment = async (req, res) => {
       break;
   }
 
+  console.log(`Plan ID: ${planId}`);
+  console.log(`Calculated Plan Duration: ${planDuration}`);
+
   try {
     let url = `https://sandbox.cashfree.com/pg/orders/${orderid}`;
     if (orderToken) {
@@ -96,6 +99,7 @@ const verifyPayment = async (req, res) => {
     };
 
     const response = await axios.request(options);
+    console.log("Cashfree response data:", response.data);
     const orderStatus = response.data.order_status;
 
     if (orderStatus === "PAID" || orderStatus === "SUCCESS") {
@@ -131,7 +135,10 @@ const verifyPayment = async (req, res) => {
     }
   } catch (error) {
     console.error("Error in verifyPayment:", error.message);
-    res.status(500).json({ success: false, message: error.message });
+    res.status(500).json({
+      success: false,
+      message: error.message,
+    });
   }
 };
 
