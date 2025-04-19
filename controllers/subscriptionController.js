@@ -61,7 +61,7 @@ const verifyPayment = async (req, res) => {
   const orderid = req.params.orderid;
   const orderToken = req.query.order_token;
   const userId = req.query.userId || "user123";
-  const planId = req.query.plan_id || "starter"; // Extract planId from query parameters
+  const planId = req.query.plan_id || "free"; // Extract planId from query parameters
 
   console.log("Plan ID from query:", planId);
 
