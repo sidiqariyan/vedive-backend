@@ -65,8 +65,8 @@ const authenticate = async (req, res, next) => {
 
       console.log(`DEBUG: Token expires in ${timeToExpire} seconds`);
 
-      // If token expires in less than 5 minutes, add refresh flag
-      if (decoded.exp && timeToExpire < 300 && timeToExpire > 0) {
+      // If token expires in less than 30days, add refresh flag
+      if (decoded.exp && timeToExpire < 2592000 && timeToExpire > 0) {
         req.tokenExpiring = true;
         console.log("DEBUG: Token marked as expiring soon");
       }
