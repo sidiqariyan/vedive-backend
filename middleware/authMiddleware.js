@@ -20,7 +20,7 @@ const authenticate = async (req, res, next) => {
     const token = authHeader.split(" ")[1]; // Extract token after "Bearer "
 
     // Log masked token for debugging
-    console.log(DEBUG: Token received (masked): ${token.substring(0, 10)}...);
+    console.log(`DEBUG: Token received (masked): ${token.substring(0, 10)}...`);
 
     // Check if token exists
     if (!token) {
@@ -34,8 +34,8 @@ const authenticate = async (req, res, next) => {
       return res.status(500).json({ error: "Server configuration error" });
     }
 
-    console.log(DEBUG: JWT_SECRET exists: ${!!process.env.JWT_SECRET});
-    console.log(DEBUG: JWT_SECRET length: ${"*".repeat(process.env.JWT_SECRET.length)}); // Masked length
+    console.log(`DEBUG: JWT_SECRET exists: ${!!process.env.JWT_SECRET}`);
+    console.log(`DEBUG: JWT_SECRET length: ${"*".repeat(process.env.JWT_SECRET.length)}`); // Masked length
 
     // Verify the token
     try {
@@ -53,17 +53,17 @@ const authenticate = async (req, res, next) => {
       // Find the user in the database
       const user = await User.findById(decoded._id);
       if (!user) {
-        console.log(DEBUG: User not found for ID: ${decoded._id});
+        console.log(`DEBUG: User not found for ID: ${decoded._id}`);
         return res.status(401).json({ error: "User not found" });
       }
 
-      console.log(DEBUG: User found: ${user._id});
+      console.log(`DEBUG: User found: ${user._id}`);
 
       // Add token expiration check
       const currentTime = Math.floor(Date.now() / 1000);
       const timeToExpire = decoded.exp - currentTime;
 
-      console.log(DEBUG: Token expires in ${timeToExpire} seconds);
+      console.log(`DEBUG: Token expires in ${timeToExpire} seconds`);
 
       // If token expires in less than 30days, add refresh flag
       if (decoded.exp && timeToExpire < 2592000 && timeToExpire > 0) {
