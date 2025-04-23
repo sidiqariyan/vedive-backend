@@ -48,7 +48,7 @@ const authenticate = async (req, res, next) => {
         return res.status(401).json({ error: "Invalid token payload" });
       }
 
-      console.log(DEBUG: User ID from token: ${decoded._id});
+      console.log(`DEBUG: User ID from token: ${decoded._id}`);
 
       // Find the user in the database
       const user = await User.findById(decoded._id);
