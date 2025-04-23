@@ -1,100 +1,65 @@
 const mongoose = require('mongoose');
-const slugify = require('slugify');
 
 const blogPostSchema = new mongoose.Schema({
   title: {
     type: String,
     required: true,
-    trim: true,
-    maxlength: 200
-  },
-  slug: {
-    type: String,
-    unique: true,
-    sparse: true
+    trim: true
   },
   content: {
     type: String,
-    required: true,
-    trim: true
-  },
-  author: {
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User',
     required: true
+  },
+  slug: {
+    type: String,
+    required: true,
+    unique: true
+  },
+  authorName: {
+    type: String,
+    default: 'Anonymous'
   },
   category: {
     type: String,
-    enum: ['Technology', 'Business', 'Lifestyle', 'Other'],
     default: 'Other'
   },
-  tags: [{
-    type: String,
-    trim: true
-  }],
-  coverImage: {
-    type: String,
-    default: null
-  },
-  readTime: {
-    type: Number,
-    default: 0
-  },
+  tags: [String],
   status: {
     type: String,
-    enum: ['published'],  // Only "published" is allowed
+    enum: ['draft', 'published'],
     default: 'published'
+  },
+  coverImage: {
+    type: String
   },
   views: {
     type: Number,
     default: 0
   },
-  likes: [{
-    type: mongoose.Schema.Types.ObjectId,
-    ref: 'User'
-  }],
+  readTime: {
+    type: Number,
+    default: 3
+  },
   comments: [{
-    user: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: 'User'
-    },
-    text: {
-      type: String,
-      required: true
-    },
+    content: String,
+    user: String,
     createdAt: {
       type: Date,
       default: Date.now
     }
   }]
-}, {
-  timestamps: true
-});
+}, { timestamps: true });
 
-// Pre-save hook to calculate read time
+// Calculate read time before saving
 blogPostSchema.pre('save', function(next) {
-  const wordsPerMinute = 200;
-  const wordCount = this.content.trim().split(/\s+/).length;
-  this.readTime = Math.ceil(wordCount / wordsPerMinute);
-  next();
-});
-
-// Pre-save hook to generate a unique slug from the title
-blogPostSchema.pre('save', async function(next) {
-  if (this.isModified('title') || !this.slug) {
-    let potentialSlug = slugify(this.title, { lower: true, strict: true });
-    let slugToCheck = potentialSlug;
-    let suffix = 1;
-    const BlogPost = mongoose.model('BlogPost', blogPostSchema);
-    let slugExists = await BlogPost.findOne({ slug: slugToCheck });
-    while (slugExists && slugExists._id.toString() !== this._id.toString()) {
-      slugToCheck = `${potentialSlug}-${suffix}`;
-      slugExists = await BlogPost.findOne({ slug: slugToCheck });
-      suffix++;
-    }
-    this.slug = slugToCheck;
+  if (this.isModified('content')) {
+    // Average reading speed: 200 words per minute
+    const wordCount = this.content.split(/\s+/).length;
+    this.readTime = Math.ceil(wordCount / 200);
   }
   next();
 });
 
-module.exports = mongoose.model('BlogPost', blogPostSchema);
+const BlogPost = mongoose.model('BlogPost', blogPostSchema);
+
+module.exports = BlogPost;
