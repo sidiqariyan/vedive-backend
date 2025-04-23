@@ -27,6 +27,7 @@ const upload = multer({
     }
   }
 });
+router.use('/uploads', express.static(path.join(__dirname, '../public/uploads')));
 
 // Create a new blog post
 router.post('/create-blog-post', authenticate, upload.single('coverImage'), async (req, res) => {
