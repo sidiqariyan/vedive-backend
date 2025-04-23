@@ -4,7 +4,6 @@ const multer = require('multer');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const BlogPost = require('../models/BlogPost');
-const { authenticate, refreshToken } = require('../middleware/authMiddleware');
 
 // Configure multer for file upload
 const storage = multer.diskStorage({
@@ -15,6 +14,7 @@ const storage = multer.diskStorage({
     cb(null, `${uuidv4()}${path.extname(file.originalname)}`);
   }
 });
+
 const upload = multer({
   storage: storage,
   limits: { fileSize: 5 * 1024 * 1024 }, // 5MB
@@ -28,46 +28,48 @@ const upload = multer({
 // Serve uploaded images statically
 router.use('/uploads', express.static(path.join(__dirname, '../public/uploads')));
 
-// Create a new blog post (protected)
+// Create a new blog post (public - no authentication)
 router.post(
   '/create-blog-post',
-  authenticate,                // ← verify & attach req.user
-  refreshToken,                // ← optionally issue X-New-Token
-  upload.single('coverImage'), // ← then handle file upload
+  upload.single('coverImage'),
   async (req, res) => {
     try {
-      let { title, content, category, tags } = req.body;
+      let { title, content, category, tags, authorName = 'Anonymous' } = req.body;
+      
       category = category && category !== 'undefined' ? category : 'Other';
-      const slug   = title.toLowerCase()
-                          .replace(/[^a-z0-9]+/g,'-')
-                          .replace(/^-+|-+$/g,'');
-      const tagArray = tags ? tags.split(',').map(t=>t.trim()) : [];
+      
+      const slug = title.toLowerCase()
+                        .replace(/[^a-z0-9]+/g,'-')
+                        .replace(/^-+|-+$/g,'');
+      
+      const tagArray = tags ? tags.split(',').map(t => t.trim()) : [];
+      
       const newPost = new BlogPost({
         title,
         content,
         slug,
-        author: req.user._id,              // ← now defined
+        authorName, // Store author name as string instead of reference
         category,
         tags: tagArray,
         status: 'published',
         coverImage: req.file ? `/uploads/blog-images/${req.file.filename}` : null
       });
+      
       await newPost.save();
       res.status(201).json(newPost);
     } catch (err) {
       console.error('Error creating blog post:', err);
-      res.status(500).json({ message: 'Error creating blog post' });
+      res.status(500).json({ message: 'Error creating blog post', error: err.message });
     }
   }
 );
 
-// Get all published blog posts with filtering and pagination
+// Get all published blog posts
 router.get('/blog-posts', async (req, res) => {
   try {
     const posts = await BlogPost.find({ status: 'published' })
-      .populate('author', 'username')
       .sort({ createdAt: -1 });
-
+    
     res.json({
       posts: posts.map(post => ({
         _id: post._id,
@@ -75,14 +77,14 @@ router.get('/blog-posts', async (req, res) => {
         slug: post.slug,
         content: post.content.substring(0, 200) + '...',
         coverImage: post.coverImage,
-        author: post.author.username,
+        authorName: post.authorName,
         category: post.category,
         readTime: post.readTime,
         createdAt: post.createdAt
       }))
     });
   } catch (error) {
-    res.status(500).json({ message: 'Error fetching posts' });
+    res.status(500).json({ message: 'Error fetching posts', error: error.message });
   }
 });
 
@@ -90,22 +92,22 @@ router.get('/blog-posts', async (req, res) => {
 router.get('/blog-posts/:identifier', async (req, res) => {
   try {
     const { identifier } = req.params;
+    
+    // Try to parse as ObjectId or use as slug
     const post = await BlogPost.findOne({
-      $or: [ { _id: identifier }, { slug: identifier } ],
+      $or: [{ _id: identifier }, { slug: identifier }],
       status: 'published'
-    })
-    .populate('author', 'username')
-    .populate('comments.user', 'username');
-
+    });
+    
     if (!post) return res.status(404).json({ message: 'Post not found' });
-
+    
     post.views += 1;
     await post.save();
-
+    
     res.json(post);
   } catch (error) {
     console.error('Error fetching blog post:', error);
-    res.status(500).json({ message: 'Error fetching blog post' });
+    res.status(500).json({ message: 'Error fetching blog post', error: error.message });
   }
 });
 
