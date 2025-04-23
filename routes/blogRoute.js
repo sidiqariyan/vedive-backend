@@ -30,7 +30,7 @@ const upload = multer({
 router.use('/uploads', express.static(path.join(__dirname, '../public/uploads')));
 
 // Create a new blog post
-router.post('/create-blog-post', authenticate, upload.single('coverImage'), async (req, res) => {
+router.post('/create-blog-post', upload.single('coverImage'), async (req, res) => {
   try {
     // Destructure only the allowed fields from the request body
     let { title, content, category, tags } = req.body;
