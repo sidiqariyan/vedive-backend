@@ -7,7 +7,7 @@ const BlogPost = require('../models/BlogPost');
 const { authenticate } = require('../middleware/authMiddleware');
 
 // Configure multer for file upload
-type storage = multer.diskStorage({
+const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, 'public/uploads/blog-images');
   },
