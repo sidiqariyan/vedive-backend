@@ -250,7 +250,7 @@ async function saveToCSV(businesses) {
 //     });
 //   });
 // });
-
+app.use('/uploads', express.static(path.join(__dirname, 'public/uploads')));
 // Dashboard Endpoint
 app.get("/api/dashboard", authenticate, async (req, res) => {
   try {
