@@ -71,52 +71,25 @@ router.post('/create-blog-post', authenticate, upload.single('coverImage'), asyn
 // Get all published blog posts with filtering and pagination
 router.get('/blog-posts', async (req, res) => {
   try {
-    const { page = 1, limit = 10, category, search, sortBy = 'createdAt', sortOrder = 'desc' } = req.query;
-
-    const query = { status: 'published' };
-
-    if (category && category.trim() !== "") {
-      query.category = category;
-    }
-    
-    if (search && search.trim() !== "") {
-      query.$or = [
-        { title: { $regex: search, $options: 'i' } },
-        { content: { $regex: search, $options: 'i' } },
-        { tags: { $regex: search, $options: 'i' } }
-      ];
-    }
-
-    const sortOptions = { [sortBy]: sortOrder === 'desc' ? -1 : 1 };
-
-    const posts = await BlogPost.find(query)
+    const posts = await BlogPost.find({ status: 'published' })
       .populate('author', 'username')
-      .sort(sortOptions)
-      .skip((Number(page) - 1) * Number(limit))
-      .limit(Number(limit));
-
-    const total = await BlogPost.countDocuments(query);
-
+      .sort({ createdAt: -1 });
+    
     res.json({
       posts: posts.map(post => ({
         _id: post._id,
         title: post.title,
         slug: post.slug,
-        content: post.content.substring(0, 200) + '...', // Preview content
+        content: post.content.substring(0, 200) + '...',
+        coverImage: post.coverImage,
         author: post.author.username,
         category: post.category,
-        coverImage: post.coverImage,
         readTime: post.readTime,
-        views: post.views,
         createdAt: post.createdAt
-      })),
-      totalPages: Math.ceil(total / limit),
-      currentPage: Number(page),
-      totalPosts: total
+      }))
     });
   } catch (error) {
-    console.error('Error fetching blog posts:', error);
-    res.status(500).json({ message: 'Error fetching blog posts' });
+    res.status(500).json({ message: 'Error fetching posts' });
   }
 });
 
