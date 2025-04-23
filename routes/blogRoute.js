@@ -4,7 +4,7 @@ const multer = require('multer');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const BlogPost = require('../models/BlogPost');
-const { authenticate } = require('../middleware/authMiddleware');
+const { authenticate, refreshToken } = require('../middleware/authMiddleware');
 
 // Configure multer for file upload
 const storage = multer.diskStorage({
@@ -31,35 +31,31 @@ router.use('/uploads', express.static(path.join(__dirname, '../public/uploads'))
 // Create a new blog post (protected)
 router.post(
   '/create-blog-post',
-  authenticate,                 // <-- authenticate first
-  upload.single('coverImage'),  // <-- then handle file upload
+  authenticate,                // ← verify & attach req.user
+  refreshToken,                // ← optionally issue X-New-Token
+  upload.single('coverImage'), // ← then handle file upload
   async (req, res) => {
     try {
       let { title, content, category, tags } = req.body;
       category = category && category !== 'undefined' ? category : 'Other';
-      const status = 'published';
-      const slug = title
-        .toLowerCase()
-        .replace(/[^a-z0-9]+/g, '-')
-        .replace(/^-+|-+$/g, '');
-      const tagArray = tags ? tags.split(',').map(tag => tag.trim()) : [];
-
-      // req.user is guaranteed by authenticate()
+      const slug   = title.toLowerCase()
+                          .replace(/[^a-z0-9]+/g,'-')
+                          .replace(/^-+|-+$/g,'');
+      const tagArray = tags ? tags.split(',').map(t=>t.trim()) : [];
       const newPost = new BlogPost({
         title,
         content,
         slug,
-        author: req.user._id,
+        author: req.user._id,              // ← now defined
         category,
         tags: tagArray,
-        status,
+        status: 'published',
         coverImage: req.file ? `/uploads/blog-images/${req.file.filename}` : null
       });
-
       await newPost.save();
       res.status(201).json(newPost);
-    } catch (error) {
-      console.error('Error creating blog post:', error);
+    } catch (err) {
+      console.error('Error creating blog post:', err);
       res.status(500).json({ message: 'Error creating blog post' });
     }
   }
