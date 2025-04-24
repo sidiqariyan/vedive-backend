@@ -29,7 +29,17 @@ if (!fs.existsSync(publicDir)) {
 connectDB();
 
 // Use Helmet for security best practices
-app.use(helmet());
+app.use('/uploads', express.static(path.join(__dirname, 'public/uploads'), {
+  setHeaders: (res) => {
+    res.set('Cross-Origin-Resource-Policy', 'cross-origin');
+    res.set('Access-Control-Allow-Origin', '*');
+  }
+}));
+app.use(
+  helmet({
+    crossOriginResourcePolicy: { policy: "cross-origin" }  // Allow cross-origin resource sharing
+  })
+);
 
 // Use CORS middleware to allow requests from any origin
 app.use(
