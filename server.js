@@ -33,12 +33,7 @@ app.use(helmet());
 
 // Use CORS middleware to allow requests from any origin
 app.use(
-  cors({
-    origin: true,
-    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
-    allowedHeaders: ["Content-Type", "Authorization"],
-    credentials: true,
-  })
+  cors()
 );
 
 app.use(express.json({ limit: "1mb" }));
