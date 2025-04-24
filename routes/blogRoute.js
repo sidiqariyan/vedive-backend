@@ -72,7 +72,7 @@ router.get('/blog-posts', async (req, res) => {
     
     res.json({
       posts: posts.map(post => ({
-        _id: post._id,
+        _id: post._id,  // Fixed: removed asterisks
         title: post.title,
         slug: post.slug,
         content: post.content.substring(0, 200) + '...',
