@@ -93,11 +93,28 @@ router.get('/blog-posts/:identifier', async (req, res) => {
   try {
     const { identifier } = req.params;
     
-    // Try to parse as ObjectId or use as slug
-    const post = await BlogPost.findOne({
-      $or: [{ _id: identifier }, { slug: identifier }],
-      status: 'published'
+    console.log('Looking for post with identifier:', identifier);
+    
+    // First, try to find by slug
+    let post = await BlogPost.findOne({ 
+      slug: identifier,
+      status: 'published' 
     });
+    
+    // If not found by slug, try to find by ID
+    if (!post) {
+      try {
+        post = await BlogPost.findOne({ 
+          _id: identifier,
+          status: 'published' 
+        });
+      } catch (idError) {
+        // Just log error but continue - this could be an invalid ObjectId format
+        console.log('Error when searching by ID:', idError.message);
+      }
+    }
+    
+    console.log('Post found:', post ? 'Yes' : 'No');
     
     if (!post) return res.status(404).json({ message: 'Post not found' });
     
