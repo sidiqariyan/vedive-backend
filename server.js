@@ -42,7 +42,7 @@ app.use(
 );
 
 // CORS configuration
-const whitelist = ["https://vedive.com", "http://localhost:5173/"];
+const whitelist = ["https://vedive.com", "http://localhost:5173"];
 const corsOptions = {
   origin: (origin, callback) => {
     if (!origin || whitelist.includes(origin)) {
