@@ -4,6 +4,7 @@ const multer = require('multer');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const BlogPost = require('../models/BlogPost');
+const { authenticate } = require('../middleware/authMiddleware'); // Import authentication middleware
 
 // Configure multer for file upload
 const storage = multer.diskStorage({
@@ -28,13 +29,21 @@ const upload = multer({
 // Serve uploaded images statically
 router.use('/uploads', express.static(path.join(__dirname, '../public/uploads')));
 
-// Create a new blog post (public - no authentication)
+// Create a new blog post (authenticated)
 router.post(
   '/create-blog-post',
+  authenticate, // Add authentication middleware
   upload.single('coverImage'),
   async (req, res) => {
     try {
-      let { title, content, category, tags, authorName = 'Anonymous' } = req.body;
+      let { title, content, category, tags, authorName } = req.body;
+      
+      // Use the authenticated user's info if available
+      if (!authorName && req.user) {
+        authorName = req.user.name || req.user.email || 'Anonymous';
+      } else {
+        authorName = authorName || 'Anonymous';
+      }
       
       category = category && category !== 'undefined' ? category : 'Other';
       
@@ -48,7 +57,8 @@ router.post(
         title,
         content,
         slug,
-        authorName, // Store author name as string instead of reference
+        authorName,
+        userId: req.user._id, // Store the user ID who created the post
         category,
         tags: tagArray,
         status: 'published',
@@ -64,6 +74,8 @@ router.post(
   }
 );
 
+// Public routes - no authentication required
+
 // Get all published blog posts
 router.get('/blog-posts', async (req, res) => {
   try {
@@ -72,7 +84,7 @@ router.get('/blog-posts', async (req, res) => {
     
     res.json({
       posts: posts.map(post => ({
-        _id: post._id,  // Fixed: removed asterisks
+        id: post._id,
         title: post.title,
         slug: post.slug,
         content: post.content.substring(0, 200) + '...',
@@ -93,8 +105,6 @@ router.get('/blog-posts/:identifier', async (req, res) => {
   try {
     const { identifier } = req.params;
     
-    console.log('Looking for post with identifier:', identifier);
-    
     // First, try to find by slug
     let post = await BlogPost.findOne({ 
       slug: identifier,
@@ -109,12 +119,9 @@ router.get('/blog-posts/:identifier', async (req, res) => {
           status: 'published' 
         });
       } catch (idError) {
-        // Just log error but continue - this could be an invalid ObjectId format
         console.log('Error when searching by ID:', idError.message);
       }
     }
-    
-    console.log('Post found:', post ? 'Yes' : 'No');
     
     if (!post) return res.status(404).json({ message: 'Post not found' });
     
