@@ -17,11 +17,23 @@ const checkExpiredSubscriptions = async () => {
     
     console.log(`Found ${expiredSubscriptions.length} expired subscriptions`);
     
-    // Update each subscription
     for (const subscription of expiredSubscriptions) {
       // Mark subscription as expired
       subscription.status = "expired";
       await subscription.save();
+      
+      // Fetch the user for this subscription
+      const user = await User.findById(subscription.userId);
+      if (!user) {
+        console.warn(`User ${subscription.userId} not found, skipping downgrade`);
+        continue;
+      }
+      
+      // Skip downgrading admins — their membership is always active
+      if (user.role === "admin") {
+        console.log(`Skipping downgrade for admin user ${user._id}`);
+        continue;
+      }
       
       // Check if user has any other active subscription
       const hasActiveSubscription = await Subscription.findOne({
