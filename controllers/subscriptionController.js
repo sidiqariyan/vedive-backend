@@ -3,9 +3,9 @@ const { secret_key, app_id } = require("../config/secret");
 const Subscription = require("../models/SubscriptionPlan");
 
 const planPrices = {
-  starter: 49,
-  business: 199,
-  enterprise: 699,
+  starter: 99,
+  business: 599,
+  enterprise: 1999,
 };
 
 const createSubscriptionOrder = async (req, res) => {
@@ -87,11 +87,11 @@ const verifyPayment = async (req, res) => {
 
     // Map order amount to plan ID
     let planId = "free"; // Default to free plan
-    if (orderAmount === 49) {
+    if (orderAmount === 99) {
       planId = "starter";
-    } else if (orderAmount === 199) {
+    } else if (orderAmount === 599) {
       planId = "business";
-    } else if (orderAmount === 699) {
+    } else if (orderAmount === 1999) {
       planId = "enterprise";
     }
 
