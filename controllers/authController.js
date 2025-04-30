@@ -5,6 +5,7 @@ const User = require("../models/User");
 const { sendVerificationEmail, sendResetPasswordEmail } = require("../utils/sendEmail");
 require("dotenv").config();
 bcrypt.setRandomFallback(crypto.randomBytes);
+
 // Helper Function: Generate JWT Token with customizable expiry (default "1h")
 const generateToken = (payload, expiresIn = "1h") => {
   return jwt.sign(payload, process.env.JWT_SECRET, { expiresIn });
@@ -123,8 +124,8 @@ exports.login = async (req, res) => {
       return res.status(400).json({ error: "Please verify your email" });
     }
 
-    // Generate JWT token
-    const token = generateToken({ _id: user._id });
+    // Generate JWT token with 30-day expiry
+    const token = generateToken({ _id: user._id }, '30d');
     res.status(200).json({
       message: "Login successful",
       token,
