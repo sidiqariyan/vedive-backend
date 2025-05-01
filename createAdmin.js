@@ -9,7 +9,7 @@ const bcrypt = require('bcrypt');
 const argv = require('minimist')(process.argv.slice(2));
 
 // Adjust path: script lives in scripts/, so go up one level to import models
-const User = require('../models/User');
+const User = require('./models/User');
 
 const MONGO_URI = process.env.MONGO_URI;
 if (!MONGO_URI) {
