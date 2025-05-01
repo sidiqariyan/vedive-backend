@@ -1,43 +1,43 @@
+#!/usr/bin/env node
 /**
  * Script to create an initial admin user in the database.
- * Usage: node scripts/createAdmin.js --name=AdminName --email=admin@example.com --password=YourPass123
+ * Usage from project root: node scripts/createAdmin.js --name=AdminName --email=admin@example.com --password=YourPass123
  */
 require('dotenv').config();
 const mongoose = require('mongoose');
 const bcrypt = require('bcrypt');
 const argv = require('minimist')(process.argv.slice(2));
 
+// Adjust path: script lives in scripts/, so go up one level to import models
 const User = require('../models/User');
 
+const MONGO_URI = process.env.MONGO_URI;
+if (!MONGO_URI) {
+  console.error('Error: MONGO_URI not set in .env');
+  process.exit(1);
+}
+
 async function main() {
+  await mongoose.connect(MONGO_URI, { useNewUrlParser: true, useUnifiedTopology: true });
+
   const { name, email, password } = argv;
   if (!name || !email || !password) {
-    console.error('Error: --name, --email and --password arguments are required');
+    console.error('Usage: node scripts/createAdmin.js --name=Name --email=you@example.com --password=pass');
     process.exit(1);
   }
 
-  // Connect to MongoDB
-  await mongoose.connect(process.env.MONGODB_URI, {
-    useNewUrlParser: true,
-    useUnifiedTopology: true,
-  });
-
-  // Check if admin already exists
-  const existing = await User.findOne({ email });
-  if (existing) {
+  // Check if user already exists
+  const exists = await User.findOne({ email });
+  if (exists) {
     console.error(`User with email ${email} already exists.`);
     process.exit(1);
   }
 
-  // Hash password
-  const salt = await bcrypt.genSalt(10);
-  const hashed = await bcrypt.hash(password, salt);
-
-  // Create admin user
+  const hash = await bcrypt.hash(password, 10);
   const admin = new User({
     name,
     email,
-    password: hashed,
+    password: hash,
     role: 'admin',
     isPaidUser: true,
     currentPlan: 'Admin',
@@ -45,7 +45,7 @@ async function main() {
   });
 
   await admin.save();
-  console.log(`Admin user created: ${admin._id}`);
+  console.log(`✅ Admin user created: ${email}`);
   process.exit(0);
 }
 
