@@ -212,16 +212,21 @@ exports.resetPassword = async (req, res) => {
  */
 exports.getUserData = async (req, res) => {
   try {
-    const user = await User.findById(req.user._id).select("name username email");
+    const user = await User.findById(req.user._id).select("name username email role");
     if (!user) {
       return res.status(404).json({ error: "User not found" });
     }
+    // return role as well
     res.json(user);
   } catch (error) {
     console.error("Error fetching user data:", error);
     res.status(500).json({ error: "Internal Server Error" });
   }
 };
+
+// File: src/routes/authRoutes.js (ensure route returns role)
+
+
 
 /**
  * Update Password
