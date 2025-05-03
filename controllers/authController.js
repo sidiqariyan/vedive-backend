@@ -100,47 +100,57 @@ exports.verifyEmail = async (req, res) => {
  * Login User
  * @route POST /api/auth/login
  */
-exports.login = async (req, res) => {
+// Add this code to your login route handler in your backend
+// to verify the correct role is being included in the JWT token
+
+// Example login route with debugging:
+router.post("/login", async (req, res) => {
   try {
-    const { emailOrUsername, password } = req.body;
-
-    // Find user by email or username
-    const user = await User.findOne({
-      $or: [{ email: emailOrUsername }, { username: emailOrUsername }],
-    });
-
+    const { email, password } = req.body;
+    
+    // Find the user
+    const user = await User.findOne({ email });
     if (!user) {
-      return res.status(400).json({ error: "Invalid credentials" });
+      return res.status(404).json({ error: "User not found" });
     }
-
-    // Check if password matches
+    
+    // Validate password
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       return res.status(400).json({ error: "Invalid credentials" });
     }
-
-    // Check if user is verified
-    if (!user.isVerified) {
-      return res.status(400).json({ error: "Please verify your email" });
-    }
-
-    // Generate JWT token with 30-day expiry
-    const token = generateToken({ _id: user._id }, '30d');
-    res.status(200).json({
-      message: "Login successful",
-      token,
-      user: {
-        _id: user._id,
-        name: user.name,
-        username: user.username,
-        email: user.email,
-      },
+    
+    // Debug the user object to ensure role exists
+    console.log("User found:", {
+      id: user._id,
+      email: user.email,
+      role: user.role // Check if this property exists and has the correct value
     });
+    
+    // Create payload for JWT token
+    const payload = {
+      id: user._id,
+      role: user.role || "user" // Ensure role is included, default to "user" if missing
+    };
+    
+    // Debug the JWT payload
+    console.log("JWT payload:", payload);
+    
+    // Generate token
+    jwt.sign(
+      payload,
+      process.env.JWT_SECRET,
+      { expiresIn: "7d" },
+      (err, token) => {
+        if (err) throw err;
+        res.json({ token });
+      }
+    );
   } catch (error) {
-    console.error("Login Error:", error);
-    res.status(500).json({ error: "Login failed" });
+    console.error("Login error:", error);
+    res.status(500).json({ error: "Server error" });
   }
-};
+});
 
 /**
  * Forgot Password
