@@ -87,7 +87,6 @@ app.use((req, res, next) => {
 app.use("/api/auth", require("./routes/authRoutes"));
 app.use("/api/whatsapp", require("./routes/whatsappRoutes"));
 app.use("/api", require("./routes/bulkMailSender"));
-app.use("/api/admin", require("./routes/adminRoutes"));
 app.use("/api", require("./routes/scraper"));
 app.use("/api", require("./routes/gmailSender"));
 app.use("/api/posts", require("./routes/PostRoutes"));
