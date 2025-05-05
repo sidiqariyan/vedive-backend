@@ -1,104 +1,84 @@
+// routes/adminRoutes.js
 const express = require("express");
 const router = express.Router();
 const { authenticate } = require("../middleware/authMiddleware");
+const { authorizeRoles } = require("../middleware/adminMiddleware");
+const User = require("../models/User");
+const Post = require("../models/Post");
 
-// Import your models (template posts and blog posts)
-const Post = require("../models/Post");       // Your template post model
-const BlogPost = require("../models/BlogPost"); // Your blog post model
-
-// Helper middleware to restrict access to admins only
-function adminOnly(req, res, next) {
-  if (req.user && req.user.role === "admin") {
-    return next();
-  }
-  return res.status(403).json({ error: "Forbidden: Admins only" });
-}
-
-/* ************************************
-   Template Post Endpoints (using Post)
-*************************************** */
-
-// Create a new template post
-router.post("/template-post", authenticate, adminOnly, async (req, res) => {
-  try {
-    const { name, description, tags, category, htmlContent } = req.body;
-    if (!name || !description || !category || !htmlContent) {
-      return res.status(400).json({ error: "Name, description, category and HTML content are required" });
+// Admin dashboard overview
+router.get(
+  "/dashboard",
+  authenticate,
+  authorizeRoles("admin"),
+  async (req, res) => {
+    try {
+      const userCount = await User.countDocuments();
+      const postCount = await Post.countDocuments();
+      res.json({ userCount, postCount });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to load dashboard" });
     }
-    // Create a new template post
-    const newPost = new Post({
-      name,
-      description,
-      tags: Array.isArray(tags) ? tags : [],
-      category,
-      htmlContent,
-    });
-    await newPost.save();
-    res.status(201).json({ message: "Template post created successfully", post: newPost });
-  } catch (error) {
-    console.error("Error creating template post:", error);
-    res.status(500).json({ error: "Error creating template post" });
   }
-});
+);
 
-// List all template posts
-router.get("/template-posts", authenticate, adminOnly, async (req, res) => {
-  try {
-    const posts = await Post.find().sort({ createdAt: -1 });
-    res.json({ posts });
-  } catch (error) {
-    console.error("Error fetching template posts:", error);
-    res.status(500).json({ error: "Error fetching template posts" });
-  }
-});
-
-/* ************************************
-   Blog Post Endpoints (using BlogPost)
-*************************************** */
-
-// Create a new blog post
-router.post("/blog-post", authenticate, adminOnly, async (req, res) => {
-  try {
-    const { title, content, category, tags, coverImage } = req.body;
-    if (!title || !content) {
-      return res.status(400).json({ error: "Title and content are required" });
+// Get all users (admin only)
+router.get(
+  "/users",
+  authenticate,
+  authorizeRoles("admin"),
+  async (req, res) => {
+    try {
+      const users = await User.find().select("-password");
+      res.json(users);
+    } catch (err) {
+      res.status(500).json({ error: "Failed to fetch users" });
     }
-    // Create a new blog post with the admin's id as the author
-    const blogPost = new BlogPost({
-      title,
-      content,
-      author: req.user._id,
-      category: category || "Other",
-      tags: Array.isArray(tags) ? tags : [],
-      coverImage: coverImage || null,
-    });
-    await blogPost.save();
-    res.status(201).json({ message: "Blog post created successfully", blogPost });
-  } catch (error) {
-    console.error("Error creating blog post:", error);
-    res.status(500).json({ error: "Error creating blog post" });
   }
-});
+);
 
-// List all blog posts
-router.get("/blog-posts", authenticate, adminOnly, async (req, res) => {
-  try {
-    const blogPosts = await BlogPost.find()
-      .sort({ createdAt: -1 })
-      .populate("author", "name email");
-    res.json({ blogPosts });
-  } catch (error) {
-    console.error("Error fetching blog posts:", error);
-    res.status(500).json({ error: "Error fetching blog posts" });
+// Delete a user by ID (admin only)
+router.delete(
+  "/users/:id",
+  authenticate,
+  authorizeRoles("admin"),
+  async (req, res) => {
+    try {
+      await User.findByIdAndDelete(req.params.id);
+      res.json({ message: "User deleted" });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to delete user" });
+    }
   }
-});
+);
 
-/* ************************************
-   Additional Admin Tools Access Endpoint
-*************************************** */
+// Manage posts (admin only)
+router.get(
+  "/posts",
+  authenticate,
+  authorizeRoles("admin"),
+  async (req, res) => {
+    try {
+      const posts = await Post.find();
+      res.json(posts);
+    } catch (err) {
+      res.status(500).json({ error: "Failed to fetch posts" });
+    }
+  }
+);
 
-router.get("/tools-access", authenticate, adminOnly, (req, res) => {
-  res.json({ message: "Admin has access to all tools and functionalities." });
-});
+router.delete(
+  "/posts/:id",
+  authenticate,
+  authorizeRoles("admin"),
+  async (req, res) => {
+    try {
+      await Post.findByIdAndDelete(req.params.id);
+      res.json({ message: "Post deleted" });
+    } catch (err) {
+      res.status(500).json({ error: "Failed to delete post" });
+    }
+  }
+);
 
 module.exports = router;
