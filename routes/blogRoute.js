@@ -4,7 +4,8 @@ const multer = require('multer');
 const path = require('path');
 const { v4: uuidv4 } = require('uuid');
 const BlogPost = require('../models/BlogPost');
-const { authenticate } = require('../middleware/authMiddleware'); // Import authentication middleware
+const { authenticate } = require('../middleware/authMiddleware');
+const { authorizeRoles } = require('../middleware/adminMiddleware'); // Import authorization middleware
 
 // Configure multer for file upload
 const storage = multer.diskStorage({
@@ -29,21 +30,18 @@ const upload = multer({
 // Serve uploaded images statically
 router.use('/uploads', express.static(path.join(__dirname, '../public/uploads')));
 
-// Create a new blog post (authenticated)
+// Create a new blog post (admin only)
 router.post(
   '/create-blog-post',
-  authenticate, // Add authentication middleware
+  authenticate,              // ensure user is authenticated
+  authorizeRoles('admin'),   // ensure user is an admin
   upload.single('coverImage'),
   async (req, res) => {
     try {
       let { title, content, category, tags, authorName } = req.body;
       
       // Use the authenticated user's info if available
-      if (!authorName && req.user) {
-        authorName = req.user.name || req.user.email || 'Anonymous';
-      } else {
-        authorName = authorName || 'Anonymous';
-      }
+      authorName = req.user.name || req.user.email || 'Anonymous';
       
       category = category && category !== 'undefined' ? category : 'Other';
       
