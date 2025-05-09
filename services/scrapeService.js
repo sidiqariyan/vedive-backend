@@ -22,8 +22,21 @@ const fetchWithRetry = async (url, retries = 3, delayMs = 2000) => {
   }
 };
 
-// Main function to scrape emails
-async function scrapeEmails(query, sites, apiKey, cx, pagesToScrape = 5) {
+// check whether an email is from Google or Google Groups
+const isExcludedEmail = (email) => {
+  const domain = email.split("@")[1].toLowerCase();
+  return /(^|\.)google\.com$/.test(domain) || /(^|\.)googlegroups\.com$/.test(domain);
+};
+
+// filter an array of emails
+const filterEmails = (emailArray) =>
+  emailArray.filter((email) => !isExcludedEmail(email));
+
+/**
+ * Main function to scrape emails.
+ * Returns only non-Google addresses.
+ */
+async function scrapeEmails(query, sites, apiKey, cx, pagesToScrape = 10) {
   console.log("Starting email scraping...");
 
   const emails = new Set();
@@ -37,21 +50,20 @@ async function scrapeEmails(query, sites, apiKey, cx, pagesToScrape = 5) {
       const searchURL = `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=${cx}&q=site:${site} ${encodeURIComponent(query)}&start=${start}`;
 
       try {
-        // Fetch search results with retries
         const response = await fetchWithRetry(searchURL);
         const items = response.data.items || [];
-
         console.log(`Found ${items.length} results on page ${i}`);
 
         for (const item of items) {
           if (site.includes("instagram.com")) {
-            puppeteerLinks.push(item.link); // Save Instagram links for Puppeteer
+            puppeteerLinks.push(item.link);
           } else {
             try {
               const pageResponse = await axios.get(item.link, { timeout: 5000 });
               const pageContent = pageResponse.data;
-              const matches = pageContent.match(emailRegex);
-              if (matches) matches.forEach((email) => emails.add(email));
+              const matches = pageContent.match(emailRegex) || [];
+              // filter out Google/Groups emails
+              filterEmails(matches).forEach((email) => emails.add(email));
             } catch (err) {
               console.error(`Error visiting ${item.link}: ${err.message}`);
             }
@@ -59,15 +71,12 @@ async function scrapeEmails(query, sites, apiKey, cx, pagesToScrape = 5) {
         }
       } catch (error) {
         console.error(`Error fetching search results for page ${i}: ${error.message}`);
-        break; // Stop further requests if quota is exceeded
+        break;
       }
-
-      // Add a delay to avoid hitting rate limits
       await delay(1000);
     }
   }
 
-  // Use Puppeteer for restricted sites like Instagram
   if (puppeteerLinks.length > 0) {
     console.log("Falling back to Puppeteer for restricted sites...");
     const puppeteerEmails = await scrapeEmailsWithPuppeteer(puppeteerLinks);
@@ -80,13 +89,10 @@ async function scrapeEmails(query, sites, apiKey, cx, pagesToScrape = 5) {
 // Puppeteer function for restricted sites
 async function scrapeEmailsWithPuppeteer(links) {
   const emails = new Set();
-  
-  // Launch browser with options to bypass sandbox issue
   const browser = await puppeteer.launch({
     headless: true,
-    args: ['--no-sandbox', '--disable-setuid-sandbox']
+    args: ["--no-sandbox", "--disable-setuid-sandbox"],
   });
-  
   const page = await browser.newPage();
 
   for (const link of links) {
@@ -94,8 +100,8 @@ async function scrapeEmailsWithPuppeteer(links) {
       console.log(`Visiting: ${link}`);
       await page.goto(link, { waitUntil: "domcontentloaded", timeout: 10000 });
       const content = await page.content();
-      const matches = content.match(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g);
-      if (matches) matches.forEach((email) => emails.add(email));
+      const matches = content.match(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g) || [];
+      filterEmails(matches).forEach((email) => emails.add(email));
     } catch (error) {
       console.error(`Error visiting ${link}: ${error.message}`);
     }
