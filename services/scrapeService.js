@@ -8,13 +8,12 @@ const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const fetchWithRetry = async (url, retries = 3, delayMs = 2000) => {
   for (let i = 0; i < retries; i++) {
     try {
-      const response = await axios.get(url);
-      return response;
+      return await axios.get(url);
     } catch (error) {
-      if (error.response && error.response.status === 429 && i < retries - 1) {
+      if (error.response?.status === 429 && i < retries - 1) {
         console.log(`Rate limit hit. Retrying in ${delayMs}ms...`);
         await delay(delayMs);
-        delayMs *= 2; // Exponential backoff
+        delayMs *= 2;
       } else {
         throw error;
       }
@@ -22,71 +21,88 @@ const fetchWithRetry = async (url, retries = 3, delayMs = 2000) => {
   }
 };
 
-// check whether an email is from Google or Google Groups
+// return true if this email should be excluded
 const isExcludedEmail = (email) => {
-  const domain = email.split("@")[1].toLowerCase();
-  return /(^|\.)google\.com$/.test(domain) || /(^|\.)googlegroups\.com$/.test(domain);
+  const [local, domain] = email.toLowerCase().split("@");
+
+  // 1) anything at google.com or googlegroups.com
+  if (/(^|\.)google\.com$/.test(domain) || /(^|\.)googlegroups\.com$/.test(domain)) {
+    return true;
+  }
+
+  // 2) anything containing literal angle‑brackets
+  if (email.includes("<") || email.includes(">")) {
+    return true;
+  }
+
+  // 3) “malformed” local parts like 10.3617… or u003c… pattern
+  //    i.e. purely numeric‑dot or start with “u003c”
+  if (/^(?:u003c|\d+\.\d+)/.test(local)) {
+    return true;
+  }
+
+  return false;
 };
 
 // filter an array of emails
-const filterEmails = (emailArray) =>
-  emailArray.filter((email) => !isExcludedEmail(email));
+const filterEmails = (candidates) =>
+  candidates.filter((e) => !isExcludedEmail(e));
 
 /**
  * Main function to scrape emails.
- * Returns only non-Google addresses.
+ * Returns only “normal” (non‑Google, non‑malformed) addresses.
  */
-async function scrapeEmails(query, sites, apiKey, cx, pagesToScrape = 10) {
+async function scrapeEmails(query, sites, apiKey, cx, pagesToScrape = 5) {
   console.log("Starting email scraping...");
-
   const emails = new Set();
-  const emailRegex = /\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g;
+  const emailRegex = /\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b/g;
   const puppeteerLinks = [];
 
   for (const site of sites) {
     console.log(`Scraping results for site: ${site}`);
     for (let i = 1; i <= pagesToScrape; i++) {
       const start = (i - 1) * 10 + 1;
-      const searchURL = `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=${cx}&q=site:${site} ${encodeURIComponent(query)}&start=${start}`;
+      const url = `https://www.googleapis.com/customsearch/v1?key=${apiKey}&cx=${cx}&q=site:${site}+${encodeURIComponent(
+        query
+      )}&start=${start}`;
 
+      let results;
       try {
-        const response = await fetchWithRetry(searchURL);
-        const items = response.data.items || [];
-        console.log(`Found ${items.length} results on page ${i}`);
-
-        for (const item of items) {
-          if (site.includes("instagram.com")) {
-            puppeteerLinks.push(item.link);
-          } else {
-            try {
-              const pageResponse = await axios.get(item.link, { timeout: 5000 });
-              const pageContent = pageResponse.data;
-              const matches = pageContent.match(emailRegex) || [];
-              // filter out Google/Groups emails
-              filterEmails(matches).forEach((email) => emails.add(email));
-            } catch (err) {
-              console.error(`Error visiting ${item.link}: ${err.message}`);
-            }
-          }
-        }
-      } catch (error) {
-        console.error(`Error fetching search results for page ${i}: ${error.message}`);
+        results = (await fetchWithRetry(url)).data.items || [];
+      } catch (err) {
+        console.error(`Error fetching page ${i}: ${err.message}`);
         break;
       }
+
+      console.log(`→ ${results.length} results on page ${i}`);
+      for (const { link } of results) {
+        if (site.includes("instagram.com")) {
+          puppeteerLinks.push(link);
+        } else {
+          try {
+            const html = (await axios.get(link, { timeout: 5000 })).data;
+            const found = html.match(emailRegex) || [];
+            filterEmails(found).forEach((e) => emails.add(e));
+          } catch (err) {
+            console.error(`Error visiting ${link}: ${err.message}`);
+          }
+        }
+      }
+
       await delay(1000);
     }
   }
 
-  if (puppeteerLinks.length > 0) {
-    console.log("Falling back to Puppeteer for restricted sites...");
-    const puppeteerEmails = await scrapeEmailsWithPuppeteer(puppeteerLinks);
-    puppeteerEmails.forEach((email) => emails.add(email));
+  if (puppeteerLinks.length) {
+    console.log("Using Puppeteer for restricted sites…");
+    const more = await scrapeEmailsWithPuppeteer(puppeteerLinks);
+    more.forEach((e) => emails.add(e));
   }
 
   return Array.from(emails);
 }
 
-// Puppeteer function for restricted sites
+// Puppeteer fallback for sites like Instagram
 async function scrapeEmailsWithPuppeteer(links) {
   const emails = new Set();
   const browser = await puppeteer.launch({
@@ -97,13 +113,13 @@ async function scrapeEmailsWithPuppeteer(links) {
 
   for (const link of links) {
     try {
-      console.log(`Visiting: ${link}`);
+      console.log(`Puppeteer visiting: ${link}`);
       await page.goto(link, { waitUntil: "domcontentloaded", timeout: 10000 });
       const content = await page.content();
-      const matches = content.match(/\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b/g) || [];
-      filterEmails(matches).forEach((email) => emails.add(email));
-    } catch (error) {
-      console.error(`Error visiting ${link}: ${error.message}`);
+      const found = content.match(/\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b/g) || [];
+      filterEmails(found).forEach((e) => emails.add(e));
+    } catch (err) {
+      console.error(`Error on ${link}: ${err.message}`);
     }
   }
 
