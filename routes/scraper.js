@@ -13,7 +13,7 @@ const { generateCSV } = require("../utils/csvWriter");
 // Handler function for email scraper that can be used by multiple routes
 const handleEmailScraper = async (req, res) => {
   try {
-    const { query, pages = 2, domains, campaignName, userId } = req.body;
+    const { query, pages = 3, domains, campaignName, userId } = req.body;
 
     // Input validation
     if (!query || typeof query !== "string") {
