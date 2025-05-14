@@ -394,7 +394,7 @@ if (fs.existsSync(SSL_KEY_PATH) && fs.existsSync(SSL_CERT_PATH)) {
     cert: fs.readFileSync(SSL_CERT_PATH),
   };
 
-https.createServer(sslOptions, app).listen(443, () => {
+https.createServer(sslOptions, app).listen(PORT, () => {
   console.log(`HTTPS Server running on https://vedive.com`);
 });
 } else {
