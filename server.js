@@ -44,16 +44,10 @@ app.use(
 // CORS configuration
 const whitelist = ["https://vedive.com","https://www.vedive.com", "http://localhost:5173"];
 const corsOptions = {
-  origin: (origin, callback) => {
-    console.log("CORS Origin:", origin); // <-- Add this
-    if (!origin || whitelist.includes(origin)) {
-      callback(null, true);
-    } else {
-      callback(new Error("Not allowed by CORS"));
-    }
-  },
+  origin: true, // temporarily allow all origins
   credentials: true,
 };
+
 
 app.use(cors(corsOptions));
 app.options("*", cors(corsOptions));
