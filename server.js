@@ -394,11 +394,10 @@ if (fs.existsSync(SSL_KEY_PATH) && fs.existsSync(SSL_CERT_PATH)) {
     cert: fs.readFileSync(SSL_CERT_PATH),
   };
 
-  https.createServer(sslOptions, app).listen(PORT, () => {
-    console.log(`HTTPS Server running on https://vedive.com:${PORT}`);
-    checkExpiredSubscriptions();
-  });
-} else {
+https.createServer(sslOptions, app).listen(443, () => {
+  console.log(`HTTPS Server running on https://vedive.com`);
+});
+ else {
   console.warn("SSL certificate files not found. Starting server in HTTP mode.");
   http.createServer(app).listen(PORT, () => {
     console.log(`HTTP Server running on port ${PORT}`);
