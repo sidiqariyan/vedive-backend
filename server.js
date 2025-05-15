@@ -105,7 +105,7 @@ app.use("/api/whatsapp", require("./routes/whatsappRoutes"));
 app.use("/api", require("./routes/bulkMailSender"));
 app.use("/api/admin", require("./routes/adminRoutes"));
 app.use("/api", require("./routes/scraper"));
-app.use("/api", require("./routes/numberScraper"));
+app.use("/api", require("./routes/NumberScraper"));
 app.use("/api", require("./routes/gmailSender"));
 app.use("/api/posts", require("./routes/PostRoutes"));
 app.use("/", require("./routes/campaignRoutes"));
