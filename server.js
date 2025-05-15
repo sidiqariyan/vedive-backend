@@ -16,6 +16,8 @@ const User = require("./models/User");
 const { searchGoogle } = require("./routes/NumberScraper");
 const { checkExpiredSubscriptions } = require("./utils/subscriptionChecker");
 
+
+
 const app = express();
 
 // Ensure the public directory exists
@@ -24,6 +26,21 @@ if (!fs.existsSync(publicDir)) {
   fs.mkdirSync(publicDir, { recursive: true });
   console.log(`Created public directory: ${publicDir}`);
 }
+// Create template-images directory
+const templateImagesDir = path.join(__dirname, 'public', 'uploads', 'template-images');
+if (!fs.existsSync(templateImagesDir)) {
+  fs.mkdirSync(templateImagesDir, { recursive: true });
+  console.log('Created directory for template images:', templateImagesDir);
+}
+
+const postImagesDir = path.join(__dirname, 'public', 'uploads', 'post-images');
+if (!fs.existsSync(postImagesDir)) {
+  fs.mkdirSync(postImagesDir, { recursive: true });
+  console.log('Created directory for post images:', postImagesDir);
+}
+
+// Serve static files from public directory
+app.use(express.static(path.join(__dirname, 'public')));
 
 // Connect to MongoDB
 connectDB();
@@ -60,7 +77,6 @@ app.options("*", cors(corsOptions));
 
 
 app.use(express.json({ limit: "1mb" }));
-app.use(express.static(publicDir));
 
 // Logging Middleware (custom)
 app.use((req, res, next) => {
@@ -87,6 +103,7 @@ app.use((req, res, next) => {
 app.use("/api/auth", require("./routes/authRoutes"));
 app.use("/api/whatsapp", require("./routes/whatsappRoutes"));
 app.use("/api", require("./routes/bulkMailSender"));
+app.use("/api/admin", require("./routes/adminRoutes"));
 app.use("/api", require("./routes/scraper"));
 app.use("/api", require("./routes/gmailSender"));
 app.use("/api/posts", require("./routes/PostRoutes"));
@@ -373,6 +390,8 @@ app.get("/api/dashboard", authenticate, async (req, res) => {
 app.get("/health", (req, res) => {
   res.status(200).json({ status: "OK" });
 });
+
+
 
 // Global Error Handler
 app.use((err, req, res, next) => {

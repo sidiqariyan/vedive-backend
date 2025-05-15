@@ -22,6 +22,11 @@ const postSchema = new mongoose.Schema({
         type: String,
         required: true,
     },
+    image: {
+        type: String,
+        default: null,
+    },
+    templateImages: [String] // ✅ Already correct!
 }, { timestamps: true });
 
 module.exports = mongoose.model('Post', postSchema);
