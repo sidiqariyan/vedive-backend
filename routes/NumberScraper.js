@@ -5,10 +5,15 @@ const { createObjectCsvWriter } = require("csv-writer");
 const puppeteer = require("puppeteer-extra");
 const stealthPlugin = require("puppeteer-extra-plugin-stealth");
 const { v4: uuidv4 } = require("uuid");
+const validator = require("validator");
+const pLimit = require("p-limit");
+
+// Import campaign model and CSV utility
+const Campaign = require("../models/Campaign");
+const { generateCSV } = require("../utils/csvWriter");
 
 const router = express.Router();
 puppeteer.use(stealthPlugin());
-
 const delay = ms => new Promise(res => setTimeout(res, ms));
 
 async function autoScroll(page) {
@@ -22,7 +27,6 @@ async function autoScroll(page) {
     }
   });
 }
-
 async function navigateWithRetries(page, url, maxRetries = 3) {
   for (let i = 0; i < maxRetries; i++) {
     try {
@@ -36,55 +40,27 @@ async function navigateWithRetries(page, url, maxRetries = 3) {
     }
   }
 }
-
-async function extractResults(page, selectors) {
-  await page.waitForSelector(selectors.item, { timeout: 10000 });
-  return page.$$eval(selectors.item, (nodes, sel) => {
-    return nodes.map(n => ({
-      title:   (n.querySelector(sel.title)?.innerText || "").trim(),
-      url:     n.querySelector(sel.url)?.href || "",
-      snippet: (n.querySelector(sel.snip)?.innerText || "").trim(),
-    }));
-  }, selectors);
-}
-
-async function searchEngine(page, engine, query, numPages = 3) {
-  const all = [];
-  for (let i = 0; i < numPages; i++) {
+async function searchEngine(page, engine, query, pages) {
+  const results = [];
+  for (let i = 0; i < pages; i++) {
     const url = engine.buildUrl(query, i);
-    console.log(`→ [${engine.name}] page ${i + 1}: ${url}`);
     await navigateWithRetries(page, url);
     await delay(1000 + Math.random() * 1000);
     await autoScroll(page);
-    let hits = [];
     try {
-      hits = await extractResults(page, engine.selectors);
+      const hits = await page.$$eval(engine.selectors.item, (nodes, sel) =>
+        nodes.map(n => n.innerText).filter(Boolean)
+      , engine.selectors);
+      results.push(...hits);
     } catch (e) {
       console.warn(`⚠️ [${engine.name}] no results: ${e.message}`);
     }
-    all.push(...hits);
     await delay(500 + Math.random() * 500);
   }
-  return all;
+  return results;
 }
 
-async function saveToCSV(records) {
-  const folder = "public";
-  if (!fs.existsSync(folder)) fs.mkdirSync(folder, { recursive: true });
-  const file = `search_results_${uuidv4()}.csv`;
-  const writer = createObjectCsvWriter({
-    path: path.join(folder, file),
-    header: [
-      { id: "engine", title: "Engine" },
-      { id: "title", title: "Title" },
-      { id: "url", title: "URL" },
-      { id: "snippet", title: "Snippet" },
-    ]
-  });
-  await writer.writeRecords(records);
-  return file;
-}
-
+// Define search engines (as before)
 const ENGINES = [
   {
     name: "Google",
@@ -478,41 +454,74 @@ const ENGINES = [
   },
 ];
 
-router.post("/search", async (req, res) => {
-  const { query } = req.body;
-  if (!query) return res.status(400).json({ error: "Missing search query" });
+// Handler for number scraping
+const handleNumberScraper = async (req, res) => {
+  try {
+    let { query, pages = 3, domains, campaignName, userId } = req.body;
+    // Validate inputs
+    if (!query || typeof query !== 'string') return res.status(400).json({ error: 'Invalid or missing query parameter' });
+    if (!campaignName || typeof campaignName !== 'string') return res.status(400).json({ error: 'Invalid or missing campaignName parameter' });
+    if (pages && (typeof pages !== 'number' || pages <= 0 || pages > 10)) return res.status(400).json({ error: 'Pages must be a positive number between 1 and 10' });
+    if (domains && !Array.isArray(domains)) return res.status(400).json({ error: 'Domains must be an array' });
 
-  const browser = await puppeteer.launch({
-    headless: true,
-    args: ["--no-sandbox", "--disable-setuid-sandbox"],
-  });
+    const userIdentifier = req.user?._id || userId || 'anonymous';
+    const customDomains = domains || [];
+    const allDomains = [...new Set(customDomains)];
+    const domainPattern = allDomains.length ? allDomains.join('|') : null;
 
-  const all = [];
-
-  for (const engine of ENGINES) {
-    const page = await browser.newPage();
-    await page.setUserAgent("Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/110.0.0.0 Safari/537.36");
-    await page.setRequestInterception(true);
-    page.on("request", req => {
-      if (["image", "media", "font"].includes(req.resourceType())) req.abort();
-      else req.continue();
-    });
-
-    try {
-      const results = await searchEngine(page, engine, query);
-      all.push(...results.map(r => ({ engine: engine.name, ...r })));
-    } catch (err) {
-      console.error(`Error scraping ${engine.name}: ${err.message}`);
+    const limit = pLimit(1);
+    const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox','--disable-setuid-sandbox'] });
+    const rawResults = [];
+    for (const engine of ENGINES) {
+      const page = await browser.newPage();
+      await page.setUserAgent('Mozilla/5.0 ...');
+      await page.setRequestInterception(true);
+      page.on('request', r => ['image','media','font'].includes(r.resourceType()) ? r.abort() : r.continue());
+      try {
+        const texts = await limit(() => searchEngine(page, engine, query, pages));
+        rawResults.push(...texts.map(text => ({ engine: engine.name, text })));
+      } catch (err) {
+        console.error(`Error scraping ${engine.name}: ${err.message}`);
+      }
+      await page.close();
     }
-    await page.close();
+    await browser.close();
+
+    // Extract phone numbers using regex
+    const phoneRegex = /\+?\d[\d\s().-]{7,}\d/g;
+    let numbers = rawResults
+      .flatMap(r => (r.text.match(phoneRegex) || []))
+      .map(num => num.trim());
+    if (domainPattern) {
+      const domainFilter = new RegExp(domainPattern.replace('.', '\\.'), 'i');
+      numbers = numbers.filter(n => domainFilter.test(n));
+    }
+    numbers = [...new Set(numbers)];
+    const validNumbers = numbers.filter(n => validator.isMobilePhone(n.replace(/[^\d+]/g, ''), 'any'));
+    if (!validNumbers.length) return res.status(404).json({ message: 'No valid phone numbers found.' });
+
+    // Save campaign
+    if (userIdentifier !== 'anonymous') {
+      const campaign = new Campaign({ userId: userIdentifier, campaignName, toolType: 'number-scraper', query, recipients: validNumbers, status: 'completed' });
+      await campaign.save();
+    }
+
+    // Generate CSV
+    const csvPath = await generateCSV(validNumbers);
+    if (!csvPath) return res.status(500).json({ error: 'Failed to generate CSV' });
+
+    // Stream file
+    res.setHeader('Content-Type','application/octet-stream');
+    res.setHeader('Content-Disposition', `attachment; filename=numbers-${Date.now()}.csv`);
+    const stream = fs.createReadStream(csvPath);
+    stream.pipe(res);
+    stream.on('close', () => fs.unlink(csvPath, () => {}));
+    stream.on('error', err => { console.error(err); if (!res.headersSent) res.status(500).json({ error: 'Stream error' }); });
+  } catch (error) {
+    console.error('Error in number scraper:', error);
+    if (!res.headersSent) res.status(500).json({ error: error.message });
   }
+};
 
-  await browser.close();
-
-  if (!all.length) return res.status(500).json({ error: "No data scraped" });
-
-  const file = await saveToCSV(all);
-  res.json({ message: "Search complete", file: `/public/${file}` });
-});
-
+router.post('/scrape-numbers', handleNumberScraper);
 module.exports = router;
