@@ -4,6 +4,7 @@ const path = require("path");
 const { createObjectCsvWriter } = require("csv-writer");
 const puppeteer = require("puppeteer-extra");
 const stealthPlugin = require("puppeteer-extra-plugin-stealth");
+const RecaptchaPlugin = require("puppeteer-extra-plugin-recaptcha");
 const { v4: uuidv4 } = require("uuid");
 const validator = require("validator");
 const pLimit = require("p-limit");
@@ -13,7 +14,14 @@ const Campaign = require("../models/Campaign");
 const { generateCSV } = require("../utils/csvWriter");
 
 const router = express.Router();
+
+// Puppeteer plugins for stealth and captcha solving
 puppeteer.use(stealthPlugin());
+puppeteer.use(RecaptchaPlugin({
+  provider: { id: '2captcha', token: process.env.TWO_CAPTCHA_API_KEY },
+  visualFeedback: false
+}));
+
 const delay = ms => new Promise(res => setTimeout(res, ms));
 
 async function autoScroll(page) {
@@ -27,40 +35,46 @@ async function autoScroll(page) {
     }
   });
 }
+
 async function navigateWithRetries(page, url, maxRetries = 3) {
   for (let i = 0; i < maxRetries; i++) {
     try {
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
+      // Attempt to solve captchas on the page
+      await page.solveRecaptchas();
       const html = await page.content();
       if (/captcha|unusual traffic/i.test(html)) throw new Error("Blocked by CAPTCHA");
       return;
     } catch (err) {
+      console.warn(`Retry ${i+1}/${maxRetries} for ${url} failed: ${err.message}`);
       if (i === maxRetries - 1) throw err;
       await delay(Math.pow(2, i) * (1000 + Math.random() * 1000));
     }
   }
 }
+
 async function searchEngine(page, engine, query, pages) {
   const results = [];
   for (let i = 0; i < pages; i++) {
     const url = engine.buildUrl(query, i);
+    console.log(`→ [${engine.name}] scraping page ${i+1}: ${url}`);
     await navigateWithRetries(page, url);
     await delay(1000 + Math.random() * 1000);
     await autoScroll(page);
     try {
-      const hits = await page.$$eval(engine.selectors.item, (nodes, sel) =>
+      const hits = await page.$$eval(engine.selectors.item, (nodes) =>
         nodes.map(n => n.innerText).filter(Boolean)
-      , engine.selectors);
-      results.push(...hits);
+      );
+      results.push(...hits.map(text => ({ engine: engine.name, text })));
     } catch (e) {
-      console.warn(`⚠️ [${engine.name}] no results: ${e.message}`);
+      console.warn(`⚠️ [${engine.name}] extraction error: ${e.message}`);
     }
     await delay(500 + Math.random() * 500);
   }
   return results;
 }
 
-// Define search engines (as before)
+// Define search engines (same as before)
 const ENGINES = [
   {
     name: "Google",
@@ -457,7 +471,7 @@ const ENGINES = [
 // Handler for number scraping
 const handleNumberScraper = async (req, res) => {
   try {
-    let { query, pages = 1, domains, campaignName, userId } = req.body;
+    let { query, pages = 3, domains, campaignName, userId } = req.body;
     // Validate inputs
     if (!query || typeof query !== 'string') return res.status(400).json({ error: 'Invalid or missing query parameter' });
     if (!campaignName || typeof campaignName !== 'string') return res.status(400).json({ error: 'Invalid or missing campaignName parameter' });
@@ -465,42 +479,43 @@ const handleNumberScraper = async (req, res) => {
     if (domains && !Array.isArray(domains)) return res.status(400).json({ error: 'Domains must be an array' });
 
     const userIdentifier = req.user?._id || userId || 'anonymous';
-    const customDomains = domains || [];
-    const allDomains = [...new Set(customDomains)];
-    const domainPattern = allDomains.length ? allDomains.join('|') : null;
+    const domainPattern = domains && domains.length ? domains.join('|').replace(/\./g, '\\.') : null;
 
     const limit = pLimit(1);
-    const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox','--disable-setuid-sandbox'] });
+    const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox','--disable-setuid-sandbox','--disable-dev-shm-usage'] });
     const rawResults = [];
     for (const engine of ENGINES) {
       const page = await browser.newPage();
-      await page.setUserAgent('Mozilla/5.0 ...');
+      await page.setUserAgent(
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/115.0.0.0 Safari/537.36'
+      );
       await page.setRequestInterception(true);
       page.on('request', r => ['image','media','font'].includes(r.resourceType()) ? r.abort() : r.continue());
+
       try {
         const texts = await limit(() => searchEngine(page, engine, query, pages));
-        rawResults.push(...texts.map(text => ({ engine: engine.name, text })));
+        rawResults.push(...texts);
       } catch (err) {
-        console.error(`Error scraping ${engine.name}: ${err.message}`);
+        console.error(`❌ Error scraping ${engine.name}: ${err.message}`);
       }
       await page.close();
     }
     await browser.close();
 
-    // Extract phone numbers using regex
+    // Extract phone numbers
     const phoneRegex = /\+?\d[\d\s().-]{7,}\d/g;
     let numbers = rawResults
       .flatMap(r => (r.text.match(phoneRegex) || []))
       .map(num => num.trim());
     if (domainPattern) {
-      const domainFilter = new RegExp(domainPattern.replace('.', '\\.'), 'i');
+      const domainFilter = new RegExp(domainPattern, 'i');
       numbers = numbers.filter(n => domainFilter.test(n));
     }
     numbers = [...new Set(numbers)];
     const validNumbers = numbers.filter(n => validator.isMobilePhone(n.replace(/[^\d+]/g, ''), 'any'));
     if (!validNumbers.length) return res.status(404).json({ message: 'No valid phone numbers found.' });
 
-    // Save campaign
+    // Save campaign if user
     if (userIdentifier !== 'anonymous') {
       const campaign = new Campaign({ userId: userIdentifier, campaignName, toolType: 'number-scraper', query, recipients: validNumbers, status: 'completed' });
       await campaign.save();
@@ -510,13 +525,14 @@ const handleNumberScraper = async (req, res) => {
     const csvPath = await generateCSV(validNumbers);
     if (!csvPath) return res.status(500).json({ error: 'Failed to generate CSV' });
 
-    // Stream file
+    // Stream CSV
     res.setHeader('Content-Type','application/octet-stream');
     res.setHeader('Content-Disposition', `attachment; filename=numbers-${Date.now()}.csv`);
     const stream = fs.createReadStream(csvPath);
     stream.pipe(res);
-    stream.on('close', () => fs.unlink(csvPath, () => {}));
+    stream.on('close', () => fs.unlinkSync(csvPath));
     stream.on('error', err => { console.error(err); if (!res.headersSent) res.status(500).json({ error: 'Stream error' }); });
+
   } catch (error) {
     console.error('Error in number scraper:', error);
     if (!res.headersSent) res.status(500).json({ error: error.message });
