@@ -36,7 +36,7 @@ async function autoScroll(page) {
   });
 }
 
-async function navigateWithRetries(page, url, maxRetries = 3) {
+async function navigateWithRetries(page, url, maxRetries = 1) {
   for (let i = 0; i < maxRetries; i++) {
     try {
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
