@@ -457,7 +457,7 @@ const ENGINES = [
 // Handler for number scraping
 const handleNumberScraper = async (req, res) => {
   try {
-    let { query, pages = 3, domains, campaignName, userId } = req.body;
+    let { query, pages = 1, domains, campaignName, userId } = req.body;
     // Validate inputs
     if (!query || typeof query !== 'string') return res.status(400).json({ error: 'Invalid or missing query parameter' });
     if (!campaignName || typeof campaignName !== 'string') return res.status(400).json({ error: 'Invalid or missing campaignName parameter' });
