@@ -25,6 +25,22 @@ if (!fs.existsSync(publicDir)) {
   console.log(`Created public directory: ${publicDir}`);
 }
 
+// Create template-images directory
+const templateImagesDir = path.join(__dirname, 'public', 'uploads', 'template-images');
+if (!fs.existsSync(templateImagesDir)) {
+  fs.mkdirSync(templateImagesDir, { recursive: true });
+  console.log('Created directory for template images:', templateImagesDir);
+}
+
+const postImagesDir = path.join(__dirname, 'public', 'uploads', 'post-images');
+if (!fs.existsSync(postImagesDir)) {
+  fs.mkdirSync(postImagesDir, { recursive: true });
+  console.log('Created directory for post images:', postImagesDir);
+}
+
+// Serve static files from public directory
+app.use(express.static(path.join(__dirname, 'public')));
+
 // Connect to MongoDB
 connectDB();
 
