@@ -78,6 +78,8 @@ app.use((req, res, next) => {
 });
 
 // Mount routes
+const numberScraperRouter = require("./routes/NumberScraper");
+app.use("/api/numberScraper", numberScraperRouter);
 app.use("/api/auth", require("./routes/authRoutes"));
 app.use("/api/whatsapp", require("./routes/whatsappRoutes"));
 app.use("/api", require("./routes/bulkMailSender"));
@@ -85,8 +87,7 @@ app.use("/api", require("./routes/scraper"));
 app.use("/api", require("./routes/gmailSender"));
 app.use("/api/posts", require("./routes/PostRoutes"));
 app.use("/", require("./routes/campaignRoutes"));
-const numberScraperRouter = require("./routes/NumberScraper");
-app.use("/api/numberScraper", numberScraperRouter);
+
 const cashfreeRoute = require("./routes/cashfreeRoute");
 const subscriptionRoute = require("./routes/subscriptionRoutes");
 app.use("/api/blog", require("./routes/blogRoute"));
