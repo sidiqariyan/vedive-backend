@@ -40,7 +40,6 @@ async function navigateWithRetries(page, url, maxRetries = 3) {
   for (let i = 0; i < maxRetries; i++) {
     try {
       await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 60000 });
-      // Attempt to solve captchas on the page
       await page.solveRecaptchas();
       const html = await page.content();
       if (/captcha|unusual traffic/i.test(html)) throw new Error("Blocked by CAPTCHA");
@@ -62,7 +61,7 @@ async function searchEngine(page, engine, query, pages) {
     await delay(1000 + Math.random() * 1000);
     await autoScroll(page);
     try {
-      const hits = await page.$$eval(engine.selectors.item, (nodes) =>
+      const hits = await page.$$eval(engine.selectors.item, nodes =>
         nodes.map(n => n.innerText).filter(Boolean)
       );
       results.push(...hits.map(text => ({ engine: engine.name, text })));
@@ -76,17 +75,7 @@ async function searchEngine(page, engine, query, pages) {
 
 // Define search engines (same as before)
 const ENGINES = [
-  {
-    name: "Google",
-    buildUrl: (q, i) => `https://www.google.com/search?q=${encodeURIComponent(q)}&start=${i * 10}`,
-    selectors: {
-      item: "div.g",
-      title: "h3",
-      url: "a",
-      snip: "div.IsZvec, div.yDYNvb",
-    },
-  },
-  {
+    {
     name: "Bing",
     buildUrl: (q, i) => `https://bing.com/search?q=${encodeURIComponent(q)}&first=${i * 10 + 1}`,
     selectors: {
@@ -107,26 +96,6 @@ const ENGINES = [
     },
   },
   {
-    name: "Startpage",
-    buildUrl: (q, i) => `https://www.startpage.com/sp/search?q=${encodeURIComponent(q)}&page=${i + 1}`,
-    selectors: {
-      item: "div.w-gl__result",
-      title: "a.w-gl__result-title",
-      url: "a.w-gl__result-title",
-      snip: "p.w-gl__description",
-    },
-  },
-  {
-    name: "Yandex",
-    buildUrl: (q, i) => `https://yandex.com/search/?text=${encodeURIComponent(q)}&p=${i}`,
-    selectors: {
-      item: "li.serp-item",
-      title: "h2 > a",
-      url: "h2 > a",
-      snip: "div.Text",
-    },
-  },
-  {
     name: "Mojeek",
     buildUrl: (q, i) => `https://www.mojeek.com/search?q=${encodeURIComponent(q)}&page=${i + 1}`,
     selectors: {
@@ -134,16 +103,6 @@ const ENGINES = [
       title: "h2 > a",
       url: "h2 > a",
       snip: "p.snippet",
-    },
-  },
-  {
-    name: "Brave",
-    buildUrl: (q, i) => `https://search.brave.com/search?q=${encodeURIComponent(q)}&page=${i + 1}`,
-    selectors: {
-      item: "div.snippet-description",
-      title: "a",
-      url: "a",
-      snip: "p",
     },
   },
   {
@@ -167,16 +126,6 @@ const ENGINES = [
     },
   },
   {
-    name: "Qwant",
-    buildUrl: (q, i) => `https://www.qwant.com/?q=${encodeURIComponent(q)}&t=web&p=${i + 1}`,
-    selectors: {
-      item: "div[data-testid='result']",
-      title: "h3",
-      url: "a",
-      snip: "p",
-    },
-  },
-  {
     name: "MetaGer",
     buildUrl: (q, i) => `https://metager.org/meta/meta.ger3?eingabe=${encodeURIComponent(q)}&focus=web&start=${i * 10}`,
     selectors: {
@@ -197,16 +146,6 @@ const ENGINES = [
     },
   },
   {
-    name: "SearXNG",
-    buildUrl: (q, i) => `https://searxng.example.com/search?q=${encodeURIComponent(q)}&page=${i + 1}`, // Replace with actual instance
-    selectors: {
-      item: "article.result",
-      title: "h3 a",
-      url: "h3 a",
-      snip: "p.content",
-    },
-  },
-  {
     name: "Swisscows",
     buildUrl: (q, i) => `https://swisscows.com/web?query=${encodeURIComponent(q)}&page=${i + 1}`,
     selectors: {
@@ -214,16 +153,6 @@ const ENGINES = [
       title: "h2 a",
       url: "h2 a",
       snip: "div.description",
-    },
-  },
-  {
-    name: "Gigablast",
-    buildUrl: (q, i) => `http://gigablast.com/search?q=${encodeURIComponent(q)}&s=${i * 10}`,
-    selectors: {
-      item: "div.result",
-      title: "a.title",
-      url: "a.title",
-      snip: "span.summary",
     },
   },
   {
@@ -307,16 +236,6 @@ const ENGINES = [
     },
   },
   {
-    name: "Thangs",
-    buildUrl: (q, i) => `https://thangs.com/search/${encodeURIComponent(q)}?page=${i + 1}`,
-    selectors: {
-      item: "div.result",
-      title: "a.title",
-      url: "a.title",
-      snip: "div.description",
-    },
-  },
-  {
     name: "Infotiger",
     buildUrl: (q, i) => `https://www.infotiger.com/search?q=${encodeURIComponent(q)}&page=${i + 1}`,
     selectors: {
@@ -324,16 +243,6 @@ const ENGINES = [
       title: "a.title",
       url: "a.title",
       snip: "div.snippet",
-    },
-  },
-  {
-    name: "Petal Search",
-    buildUrl: (q, i) => `https://petalsearch.com/search?query=${encodeURIComponent(q)}&page=${i + 1}`,
-    selectors: {
-      item: "div.result",
-      title: "h3 a",
-      url: "h3 a",
-      snip: "p.description",
     },
   },
   {
@@ -394,26 +303,6 @@ const ENGINES = [
       title: "a.title",
       url: "a.title",
       snip: "div.description",
-    },
-  },
-  {
-    name: "Seznam.cz",
-    buildUrl: (q, i) => `https://search.seznam.cz/?q=${encodeURIComponent(q)}&p=${i}`,
-    selectors: {
-      item: "div.result",
-      title: "h3 a",
-      url: "h3 a",
-      snip: "p.description",
-    },
-  },
-  {
-    name: "WebCrawler",
-    buildUrl: (q, i) => `https://www.webcrawler.com/serp?q=${encodeURIComponent(q)}&page=${i + 1}`,
-    selectors: {
-      item: "div.result",
-      title: "a.title",
-      url: "a.title",
-      snip: "div.snippet",
     },
   },
   {
@@ -486,9 +375,7 @@ const handleNumberScraper = async (req, res) => {
     const rawResults = [];
     for (const engine of ENGINES) {
       const page = await browser.newPage();
-      await page.setUserAgent(
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/115.0.0.0 Safari/537.36'
-      );
+      await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/115.0.0.0 Safari/537.36');
       await page.setRequestInterception(true);
       page.on('request', r => ['image','media','font'].includes(r.resourceType()) ? r.abort() : r.continue());
 
@@ -504,13 +391,25 @@ const handleNumberScraper = async (req, res) => {
 
     // Extract phone numbers
     const phoneRegex = /\+?\d[\d\s().-]{7,}\d/g;
-    let numbers = rawResults
-      .flatMap(r => (r.text.match(phoneRegex) || []))
-      .map(num => num.trim());
+    let numbers = rawResults.flatMap(r => (r.text.match(phoneRegex) || [])).map(n => n.trim());
+
+    // Filter out unwanted patterns
+    numbers = numbers.filter(n => {
+      if (n.includes(' ')) return false;                       // embedded spaces
+      if (/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(n)) return false; // dates
+      if (/^[0]+$/.test(n)) return false;                      // zeros
+      if (/[eE]\+?\d+/.test(n)) return false;                // scientific
+      if (/^-/.test(n)) return false;                          // negative
+      if (/\d+\s*-\s*\d+/.test(n)) return false;           // ranges
+      if (/\d+\.\s*\d+/.test(n)) return false;             // decimals with space
+      return true;
+    });
+
     if (domainPattern) {
       const domainFilter = new RegExp(domainPattern, 'i');
       numbers = numbers.filter(n => domainFilter.test(n));
     }
+
     numbers = [...new Set(numbers)];
     const validNumbers = numbers.filter(n => validator.isMobilePhone(n.replace(/[^\d+]/g, ''), 'any'));
     if (!validNumbers.length) return res.status(404).json({ message: 'No valid phone numbers found.' });
