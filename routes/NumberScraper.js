@@ -15,7 +15,7 @@ const { generateCSV } = require("../utils/csvWriter");
 
 const router = express.Router();
 
-// Puppeteer plugins for stealth and captcha solving
+// Puppeteer plugins
 puppeteer.use(stealthPlugin());
 puppeteer.use(RecaptchaPlugin({
   provider: { id: '2captcha', token: process.env.TWO_CAPTCHA_API_KEY },
@@ -52,28 +52,24 @@ async function navigateWithRetries(page, url, maxRetries = 1) {
   }
 }
 
-async function searchEngine(page, engine, query, pages) {
-  const results = [];
-  for (let i = 0; i < pages; i++) {
-    const url = engine.buildUrl(query, i);
-    console.log(`→ [${engine.name}] scraping page ${i+1}: ${url}`);
-    await navigateWithRetries(page, url);
-    await delay(1000 + Math.random() * 1000);
-    await autoScroll(page);
-    try {
-      const hits = await page.$$eval(engine.selectors.item, nodes =>
-        nodes.map(n => n.innerText).filter(Boolean)
-      );
-      results.push(...hits.map(text => ({ engine: engine.name, text })));
-    } catch (e) {
-      console.warn(`⚠️ [${engine.name}] extraction error: ${e.message}`);
-    }
-    await delay(500 + Math.random() * 500);
+async function searchEngineFirstPage(page, engine, query) {
+  const url = engine.buildUrl(query, 0);
+  console.log(`→ [${engine.name}] scraping: ${url}`);
+  await navigateWithRetries(page, url);
+  await delay(1000 + Math.random() * 1000);
+  await autoScroll(page);
+  try {
+    const hits = await page.$$eval(engine.selectors.item, nodes =>
+      nodes.map(n => n.innerText).filter(Boolean)
+    );
+    return hits.map(text => ({ engine: engine.name, text }));
+  } catch (e) {
+    console.warn(`⚠️ [${engine.name}] extraction error: ${e.message}`);
+    return [];
   }
-  return results;
 }
 
-// Define search engines (same as before)
+// Define search engines
 const ENGINES = [
     {
     name: "Bing",
@@ -357,22 +353,19 @@ const ENGINES = [
   },
 ];
 
-// Handler for number scraping
 const handleNumberScraper = async (req, res) => {
   try {
-    let { query, pages = 1, domains, campaignName, userId } = req.body;
-    // Validate inputs
-    if (!query || typeof query !== 'string') return res.status(400).json({ error: 'Invalid or missing query parameter' });
-    if (!campaignName || typeof campaignName !== 'string') return res.status(400).json({ error: 'Invalid or missing campaignName parameter' });
-    if (pages && (typeof pages !== 'number' || pages <= 0 || pages > 10)) return res.status(400).json({ error: 'Pages must be a positive number between 1 and 10' });
-    if (domains && !Array.isArray(domains)) return res.status(400).json({ error: 'Domains must be an array' });
+    const { query, domains, campaignName, userId } = req.body;
+    if (!query || typeof query !== 'string') return res.status(400).json({ error: 'Invalid or missing query' });
+    if (!campaignName || typeof campaignName !== 'string') return res.status(400).json({ error: 'Invalid or missing campaignName' });
 
     const userIdentifier = req.user?._id || userId || 'anonymous';
-    const domainPattern = domains && domains.length ? domains.join('|').replace(/\./g, '\\.') : null;
+    const domainPattern = domains?.length ? domains.join('|').replace(/\./g, '\\.') : null;
 
     const limit = pLimit(1);
     const browser = await puppeteer.launch({ headless: true, args: ['--no-sandbox','--disable-setuid-sandbox','--disable-dev-shm-usage'] });
     const rawResults = [];
+
     for (const engine of ENGINES) {
       const page = await browser.newPage();
       await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/115.0.0.0 Safari/537.36');
@@ -380,28 +373,27 @@ const handleNumberScraper = async (req, res) => {
       page.on('request', r => ['image','media','font'].includes(r.resourceType()) ? r.abort() : r.continue());
 
       try {
-        const texts = await limit(() => searchEngine(page, engine, query, pages));
-        rawResults.push(...texts);
+        const results = await limit(() => searchEngineFirstPage(page, engine, query));
+        rawResults.push(...results);
       } catch (err) {
         console.error(`❌ Error scraping ${engine.name}: ${err.message}`);
       }
       await page.close();
     }
+
     await browser.close();
 
-    // Extract phone numbers
     const phoneRegex = /\+?\d[\d\s().-]{7,}\d/g;
     let numbers = rawResults.flatMap(r => (r.text.match(phoneRegex) || [])).map(n => n.trim());
 
-    // Filter out unwanted patterns
     numbers = numbers.filter(n => {
-      if (n.includes(' ')) return false;                       // embedded spaces
-      if (/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(n)) return false; // dates
-      if (/^[0]+$/.test(n)) return false;                      // zeros
-      if (/[eE]\+?\d+/.test(n)) return false;                // scientific
-      if (/^-/.test(n)) return false;                          // negative
-      if (/\d+\s*-\s*\d+/.test(n)) return false;           // ranges
-      if (/\d+\.\s*\d+/.test(n)) return false;             // decimals with space
+      if (n.includes(' ')) return false;
+      if (/^\d{1,2}\/\d{1,2}\/\d{2,4}$/.test(n)) return false;
+      if (/^[0]+$/.test(n)) return false;
+      if (/[eE]\+?\d+/.test(n)) return false;
+      if (/^-/.test(n)) return false;
+      if (/\d+\s*-\s*\d+/.test(n)) return false;
+      if (/\d+\.\s*\d+/.test(n)) return false;
       return true;
     });
 
@@ -412,19 +404,15 @@ const handleNumberScraper = async (req, res) => {
 
     numbers = [...new Set(numbers)];
     const validNumbers = numbers.filter(n => validator.isMobilePhone(n.replace(/[^\d+]/g, ''), 'any'));
-    if (!validNumbers.length) return res.status(404).json({ message: 'No valid phone numbers found.' });
+    if (validNumbers.length === 0) return res.status(404).json({ message: 'No valid phone numbers found.' });
 
-    // Save campaign if user
     if (userIdentifier !== 'anonymous') {
-      const campaign = new Campaign({ userId: userIdentifier, campaignName, toolType: 'number-scraper', query, recipients: validNumbers, status: 'completed' });
-      await campaign.save();
+      await new Campaign({ userId: userIdentifier, campaignName, toolType: 'number-scraper', query, recipients: validNumbers, status: 'completed' }).save();
     }
 
-    // Generate CSV
     const csvPath = await generateCSV(validNumbers);
     if (!csvPath) return res.status(500).json({ error: 'Failed to generate CSV' });
 
-    // Stream CSV
     res.setHeader('Content-Type','application/octet-stream');
     res.setHeader('Content-Disposition', `attachment; filename=numbers-${Date.now()}.csv`);
     const stream = fs.createReadStream(csvPath);
