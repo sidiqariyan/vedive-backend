@@ -4,10 +4,10 @@ const Subscription = require("../models/SubscriptionPlan");
 
 // Plan configurations: price (INR) and duration in milliseconds
 const planConfigs = {
-  free: { price: 0, duration: 0 }, // lifetime free
-  daily: { price: 99, duration: 1 * 24 * 60 * 60 * 1000 }, // 1 day
-  weekly: { price: 499, duration: 7 * 24 * 60 * 60 * 1000 }, // 1 week
-  monthly: { price: 1999, duration: 30 * 24 * 60 * 60 * 1000 }, // 1 month
+  free: { price: 0, duration: 0 },       // lifetime free
+  daily: { price: 99, duration: 1 * 24 * 60 * 60 * 1000 },    // 1 day
+  weekly: { price: 499, duration: 7 * 24 * 60 * 60 * 1000 },  // 1 week
+  monthly: { price: 1999, duration: 30 * 24 * 60 * 60 * 1000 } // 1 month
 };
 
 const createSubscriptionOrder = async (req, res) => {
@@ -123,22 +123,25 @@ const verifyPayment = async (req, res) => {
 
 const getSubscriptionStatus = async (req, res) => {
   const userId = req.query.userId || "user123";
+  const now = new Date();
   let subscription = await Subscription.findOne({ userId });
-  if (subscription) {
-    const now = new Date();
-    if (subscription.endDate && now > subscription.endDate) {
-      // Downgrade to free after expiry
-      subscription.plan = "free";
-      subscription.startDate = now;
-      subscription.endDate = null;
-      await subscription.save();
-    }
+
+  // If new user with no subscription, assign free plan
+  if (!subscription) {
+    subscription = new Subscription({ userId, plan: "free", startDate: now, endDate: null });
+    await subscription.save();
+  } else if (subscription.endDate && now > subscription.endDate) {
+    // Downgrade to free after expiry
+    subscription.plan = "free";
+    subscription.startDate = now;
+    subscription.endDate = null;
+    await subscription.save();
   }
 
   res.status(200).json({
     success: true,
-    hasActiveSubscription: subscription ? subscription.plan !== "free" : false,
-    currentPlan: subscription ? subscription.plan : "free",
+    hasActiveSubscription: subscription.plan !== "free",
+    currentPlan: subscription.plan,
     subscription,
   });
 };
