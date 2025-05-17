@@ -1,226 +1,108 @@
-const express = require("express");
-const router = express.Router();
-const crypto = require("crypto");
+// controllers/subscriptionController.js
 const axios = require("axios");
-const { authenticate } = require("../../middleware/authMiddleware");
-const User = require("../../models/User");
-const Subscription = require("../../models/SubscriptionPlan");
-const { v4: uuidv4 } = require("uuid");
-const { validatePaymentRequest } = require("../../middleware/paymentValidation");
+const mongoose = require("mongoose");
+const dayjs = require("dayjs");
+const { getCashfreeClient } = require("../services/cashfreeClient");
+const subscriptionService = require("../services/subscriptionService");
+const { PLANS } = require("../config/plans");
 
-// Cashfree configuration
-const CASHFREE_CONFIG = {
-  baseURL: process.env.NODE_ENV === "production" 
-    ? "https://api.cashfree.com/pg" 
-    : "https://sandbox.cashfree.com/pg",
-  headers: {
-    "x-api-version": "2022-09-01",
-    "Content-Type": "application/json",
-    "x-client-id": process.env.CASHFREE_APP_ID,
-    "x-client-secret": process.env.CASHFREE_SECRET_KEY
-  }
-};
+// Create Order Handler
+async function createSubscriptionOrder(req, res, next) {
+  const session = await mongoose.startSession();
+  session.startTransaction();
+  try {
+    const userId = req.user._id;
+    const { planId } = req.body;
+    if (!PLANS[planId]) {
+      return res.status(400).json({ error: "Invalid plan" });
+    }
 
-// Enhanced plan configuration with validation
-const validatePlans = () => {
-  const requiredFields = ['id', 'name', 'price', 'durationDays', 'features'];
-  Object.values(PLANS).forEach(plan => {
-    requiredFields.forEach(field => {
-      if (!plan[field]) throw new Error(`Missing ${field} in plan configuration`);
+    const plan = PLANS[planId];
+    // Create a pending subscription record
+    const subscription = await subscriptionService.createPending(userId, planId, session);
+
+    // Initialize Cashfree order
+    const cashfree = getCashfreeClient();
+    const orderResponse = await cashfree.createOrder({
+      orderId: subscription.orderId,
+      amount: plan.price,
+      currency: "INR",
+      customer: {
+        id: userId,
+        name: req.user.name,
+        email: req.user.email,
+        phone: req.user.phone,
+      },
+      returnUrl: `${process.env.FRONTEND_URL}/payment-status`,
+      notifyUrl: `${process.env.BASE_URL}/api/subscription/webhook`,
     });
-  });
-};
 
-const PLANS = {
-  starter: {
-    id: "starter",
-    name: "Starter",
-    price: 49,
-    durationDays: 1,
-    features: ["mail_sending", "mail_scraping", "whatsapp_sending", "number_scraping", "templates"]
-  },
-  // Other plans...
-};
+    await session.commitTransaction();
+    session.endSession();
 
-validatePlans(); // Validate at startup
+    return res.json({
+      success: true,
+      orderId: subscription.orderId,
+      paymentSessionId: orderResponse.payment_session_id,
+      paymentLink: orderResponse.payment_link,
+    });
+  } catch (err) {
+    await session.abortTransaction();
+    session.endSession();
+    next(err);
+  }
+}
 
-// Payment Order Creation
-router.post("/payment/create-order", 
-  authenticate,
-  validatePaymentRequest,
-  async (req, res) => {
-    try {
-      const { planId } = req.body;
-      const user = await User.findById(req.user._id);
-      
-      if (!user) return res.status(404).json({ error: "User not found" });
-      if (!PLANS[planId]) return res.status(400).json({ error: "Invalid plan" });
+// Verify Payment Handler
+async function verifyPayment(req, res, next) {
+  try {
+    const userId = req.user._id;
+    const { orderId } = req.body;
+    const cashfree = getCashfreeClient();
+    const cfData = await cashfree.getOrder(orderId);
 
-      const orderId = `order_${uuidv4()}`;
-      const plan = PLANS[planId];
-
-      const orderPayload = {
-        order_id: orderId,
-        order_amount: plan.price,
-        order_currency: "INR",
-        customer_details: {
-          customer_id: user._id.toString(),
-          customer_name: user.name,
-          customer_email: user.email,
-          customer_phone: user.phone || "9999999999"
-        },
-        order_meta: {
-          return_url: `${process.env.FRONTEND_URL}/payment-status?order_id={order_id}`,
-          notify_url: `${process.env.BASE_URL}/api/payment/webhook`
-        }
-      };
-
-      const { data } = await axios.post(
-        `${CASHFREE_CONFIG.baseURL}/orders`,
-        orderPayload,
-        { headers: CASHFREE_CONFIG.headers }
-      );
-
-      await Subscription.create({
-        userId: user._id,
-        planId,
-        ...plan,
-        orderId,
-        status: "pending"
-      });
-
-      res.json({
-        success: true,
-        orderId,
-        paymentSessionId: data.payment_session_id,
-        paymentLink: data.payment_link
-      });
-
-    } catch (error) {
-      console.error(`Order Creation Error: ${error.message}`);
-      res.status(500).json({
-        error: "Payment initialization failed",
-        details: process.env.NODE_ENV === "development" ? error.message : null
-      });
+    if (cfData.order_status !== "PAID") {
+      return res.status(400).json({ error: "Payment incomplete" });
     }
+
+    const subscription = await subscriptionService.activate(orderId, dayjs(cfData.order_date), next);
+    return res.json({ success: true, subscription });
+  } catch (err) {
+    next(err);
   }
-);
+}
 
-// Payment Verification
-router.post("/payment/verify", 
-  authenticate,
-  async (req, res) => {
-    try {
-      const { orderId } = req.body;
-      const user = req.user;
-      
-      const [subscription, cfResponse] = await Promise.all([
-        Subscription.findOne({ orderId, userId: user._id }),
-        axios.get(`${CASHFREE_CONFIG.baseURL}/orders/${orderId}`, {
-          headers: CASHFREE_CONFIG.headers
-        })
-      ]);
+// Webhook Handler
+async function webhookHandler(req, res, next) {
+  try {
+    const valid = subscriptionService.verifySignature(req.body, req.headers['x-webhook-signature']);
+    if (!valid) return res.status(401).json({ error: 'Invalid signature' });
 
-      if (!subscription) return res.status(404).json({ error: "Subscription not found" });
-      
-      const paymentData = cfResponse.data;
-      if (paymentData.order_status !== "PAID") {
-        return handleFailedPayment(res, subscription, paymentData.order_status);
-      }
-
-      const { startDate, endDate } = calculateSubscriptionDates(subscription.durationDays);
-      
-      await Promise.all([
-        Subscription.findByIdAndUpdate(subscription._id, {
-          status: "active",
-          paymentId: paymentData.cf_payment_id,
-          startDate,
-          endDate
-        }),
-        User.findByIdAndUpdate(user._id, {
-          isPaidUser: true,
-          currentPlan: subscription.planName,
-          subscriptionEndDate: endDate
-        })
-      ]);
-
-      res.json({ success: true, message: "Payment verified successfully" });
-
-    } catch (error) {
-      console.error(`Verification Error: ${error.message}`);
-      res.status(500).json({
-        error: "Payment verification failed",
-        details: process.env.NODE_ENV === "development" ? error.message : null
-      });
-    }
+    const event = req.body;
+    await subscriptionService.handleEvent(event);
+    return res.json({ success: true });
+  } catch (err) {
+    next(err);
   }
-);
+}
 
-// Enhanced Webhook Handler
-router.post("/payment/webhook", 
-  async (req, res) => {
-    try {
-      const signature = req.headers["x-webhook-signature"];
-      if (!verifyWebhookSignature(req.body, signature)) {
-        return res.status(401).json({ error: "Invalid signature" });
-      }
-
-      const event = req.body;
-      const { order_id, cf_payment_id } = event.data || {};
-      
-      switch (event.event_type) {
-        case "ORDER_PAID":
-          await handleSuccessfulPayment(order_id, cf_payment_id);
-          break;
-        case "ORDER_FAILED":
-          await handleFailedOrder(order_id);
-          break;
-        case "REFUND_PROCESSED":
-          await handleRefund(order_id);
-          break;
-      }
-
-      res.json({ success: true });
-
-    } catch (error) {
-      console.error(`Webhook Error: ${error.message}`);
-      res.status(500).json({ error: "Webhook processing failed" });
-    }
+// Status Handler
+async function getSubscriptionStatus(req, res, next) {
+  try {
+    const userId = req.user._id;
+    const status = await subscriptionService.getStatus(userId);
+    return res.json({ success: true, ...status });
+  } catch (err) {
+    next(err);
   }
-);
+}
 
-// Helper functions
-const verifyWebhookSignature = (body, signature) => {
-  const generatedSignature = crypto
-    .createHmac("sha256", process.env.CASHFREE_SECRET_KEY)
-    .update(JSON.stringify(body))
-    .digest("base64");
-
-  return signature === generatedSignature;
+module.exports = {
+  createSubscriptionOrder,
+  verifyPayment,
+  webhookHandler,
+  getSubscriptionStatus,
 };
 
-const calculateSubscriptionDates = (durationDays) => {
-  const startDate = new Date();
-  const endDate = new Date(startDate);
-  endDate.setDate(startDate.getDate() + durationDays);
-  return { startDate, endDate };
-};
-
-const handleFailedPayment = async (res, subscription, status) => {
-  if (subscription.status === "pending") {
-    await Subscription.findByIdAndUpdate(subscription._id, { status: "failed" });
-  }
-  return res.status(400).json({
-    success: false,
-    error: "Payment incomplete",
-    status
-  });
-};
-
-// Additional subscription management endpoints remain similar but would include:
-// - Better error handling
-// - Transactional database operations
-// - Proper status code handling
-// - Rate limiting for sensitive endpoints
-
-module.exports = router;
+// Note: The service layer (services/subscriptionService.js) would encapsulate all DB interactions,
+// PLANS come from a config file, and getCashfreeClient wraps axios with proper baseURL and headers.
