@@ -12,14 +12,32 @@ const planConfigs = {
 
 const createSubscriptionOrder = async (req, res) => {
   try {
-    const { planId = "free", email, phone, name } = req.body;
+    const { planId = "free", email, phone, name, userId } = req.body;
     if (!planConfigs[planId]) {
       return res.status(400).json({ success: false, message: "Invalid planId" });
     }
 
+    const now = new Date();
+    const { price, duration } = planConfigs[planId];
+    const expiry = duration ? new Date(now.getTime() + duration) : null;
+
+    // Handle free plan immediately without payment
+    if (planId === "free") {
+      let sub = await Subscription.findOne({ userId });
+      if (!sub) {
+        sub = new Subscription({ userId, plan: "free", startDate: now, endDate: null });
+      } else {
+        sub.plan = "free";
+        sub.startDate = now;
+        sub.endDate = null;
+      }
+      await sub.save();
+      return res.status(200).json({ success: true, message: "Free plan activated.", subscription: sub });
+    }
+
+    // Paid plans: create order via Cashfree
     const orderId = "ORID" + Date.now();
     const customerId = "CID" + Date.now();
-    const orderAmount = planConfigs[planId].price;
 
     const options = {
       method: "POST",
@@ -42,7 +60,7 @@ const createSubscriptionOrder = async (req, res) => {
           notify_url: process.env.CASHFREE_NOTIFY_URL || "https://your-notify-url.com",
           payment_methods: "cc,dc,upi",
         },
-        order_amount: orderAmount,
+        order_amount: price,
         order_id: orderId,
         order_currency: "INR",
         order_note: `Subscription order for plan ${planId}`,
@@ -65,7 +83,7 @@ const createSubscriptionOrder = async (req, res) => {
 const verifyPayment = async (req, res) => {
   const orderid = req.params.orderid;
   const orderToken = req.query.order_token;
-  const userId = req.query.userId || "user123";
+  const userId = req.query.userId || req.body.userId;
 
   try {
     let url = `https://sandbox.cashfree.com/pg/orders/${orderid}`;
@@ -122,7 +140,7 @@ const verifyPayment = async (req, res) => {
 };
 
 const getSubscriptionStatus = async (req, res) => {
-  const userId = req.query.userId || "user123";
+  const userId = req.query.userId || req.body.userId;
   const now = new Date();
   let subscription = await Subscription.findOne({ userId });
 
