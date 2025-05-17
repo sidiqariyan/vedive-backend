@@ -2,19 +2,24 @@ const axios = require("axios");
 const { secret_key, app_id } = require("../config/secret");
 const Subscription = require("../models/SubscriptionPlan");
 
-const planPrices = {
-  starter: 99,
-  business: 599,
-  enterprise: 1999,
+// Plan configurations: price (INR) and duration in milliseconds
+const planConfigs = {
+  free: { price: 0, duration: 0 }, // lifetime free
+  daily: { price: 99, duration: 1 * 24 * 60 * 60 * 1000 }, // 1 day
+  weekly: { price: 499, duration: 7 * 24 * 60 * 60 * 1000 }, // 1 week
+  monthly: { price: 1999, duration: 30 * 24 * 60 * 60 * 1000 }, // 1 month
 };
 
 const createSubscriptionOrder = async (req, res) => {
   try {
-    const { planId, email, phone, name, amount } = req.body;
+    const { planId = "free", email, phone, name } = req.body;
+    if (!planConfigs[planId]) {
+      return res.status(400).json({ success: false, message: "Invalid planId" });
+    }
+
     const orderId = "ORID" + Date.now();
     const customerId = "CID" + Date.now();
-
-    const orderAmount = amount || planPrices[planId] || 1;
+    const orderAmount = planConfigs[planId].price;
 
     const options = {
       method: "POST",
@@ -63,11 +68,9 @@ const verifyPayment = async (req, res) => {
   const userId = req.query.userId || "user123";
 
   try {
-    // Fetch order details from Cashfree
     let url = `https://sandbox.cashfree.com/pg/orders/${orderid}`;
-    if (orderToken) {
-      url += `?order_token=${orderToken}`;
-    }
+    if (orderToken) url += `?order_token=${orderToken}`;
+
     const options = {
       method: "GET",
       url,
@@ -80,83 +83,41 @@ const verifyPayment = async (req, res) => {
     };
 
     const response = await axios.request(options);
-    console.log("Cashfree response data:", response.data);
+    const { order_status: orderStatus, order_amount: orderAmount } = response.data;
 
-    const orderStatus = response.data.order_status;
-    const orderAmount = response.data.order_amount;
+    // Determine plan by amount
+    const planId = Object.keys(planConfigs).find(
+      key => planConfigs[key].price === orderAmount
+    ) || "free";
 
-    // Map order amount to plan ID
-    let planId = "free"; // Default to free plan
-    if (orderAmount === 99) {
-      planId = "starter";
-    } else if (orderAmount === 599) {
-      planId = "business";
-    } else if (orderAmount === 1999) {
-      planId = "enterprise";
-    }
-
-    console.log(`Plan ID from order amount: ${planId}`);
-
-    // Calculate plan duration
-    let planDuration = 0;
-    switch (planId) {
-      case "free":
-        planDuration = 0; // No expiry for free plan
-        break;
-      case "starter":
-        planDuration = 1 * 24 * 60 * 60 * 1000; // 1 day
-        break;
-      case "business":
-        planDuration = 7 * 24 * 60 * 60 * 1000; // 1 week
-        break;
-      case "enterprise":
-        planDuration = 30 * 24 * 60 * 60 * 1000; // 1 month
-        break;
-      default:
-        console.error("Invalid planId:", planId);
-        planDuration = 0; // Free plan – no expiry
-        break;
-    }
-
-    console.log(`Calculated Plan Duration: ${planDuration}`);
+    const now = new Date();
+    const duration = planConfigs[planId].duration;
+    const expiry = duration ? new Date(now.getTime() + duration) : null;
 
     if (orderStatus === "PAID" || orderStatus === "SUCCESS") {
       let sub = await Subscription.findOne({ userId });
       if (!sub) {
-        sub = new Subscription({
-          userId,
-          plan: planId,
-          startDate: new Date(),
-          endDate: planDuration ? new Date(Date.now() + planDuration) : null,
-        });
+        sub = new Subscription({ userId, plan: planId, startDate: now, endDate: expiry });
       } else {
         sub.plan = planId;
-        sub.startDate = new Date();
-        sub.endDate = planDuration ? new Date(Date.now() + planDuration) : null;
+        sub.startDate = now;
+        sub.endDate = expiry;
       }
       await sub.save();
 
-      res.status(200).json({
+      return res.status(200).json({
         success: true,
         message: "Payment verified and subscription activated.",
         orderStatus,
         subscription: sub,
         data: response.data,
       });
-    } else {
-      res.status(200).json({
-        success: false,
-        message: "Payment not completed.",
-        orderStatus,
-        data: response.data,
-      });
     }
+
+    res.status(200).json({ success: false, message: "Payment not completed.", orderStatus, data: response.data });
   } catch (error) {
     console.error("Error in verifyPayment:", error.message);
-    res.status(500).json({
-      success: false,
-      message: error.message,
-    });
+    res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -164,13 +125,16 @@ const getSubscriptionStatus = async (req, res) => {
   const userId = req.query.userId || "user123";
   let subscription = await Subscription.findOne({ userId });
   if (subscription) {
-    if (subscription.endDate && new Date() > subscription.endDate) {
+    const now = new Date();
+    if (subscription.endDate && now > subscription.endDate) {
+      // Downgrade to free after expiry
       subscription.plan = "free";
-      subscription.startDate = new Date();
+      subscription.startDate = now;
       subscription.endDate = null;
       await subscription.save();
     }
   }
+
   res.status(200).json({
     success: true,
     hasActiveSubscription: subscription ? subscription.plan !== "free" : false,
@@ -179,8 +143,4 @@ const getSubscriptionStatus = async (req, res) => {
   });
 };
 
-module.exports = {
-  createSubscriptionOrder,
-  verifyPayment,
-  getSubscriptionStatus,
-};
+module.exports = { createSubscriptionOrder, verifyPayment, getSubscriptionStatus };
