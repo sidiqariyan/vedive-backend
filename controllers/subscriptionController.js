@@ -49,7 +49,7 @@ const createSubscriptionOrder = async (req, res) => {
 
     const options = {
       method: "POST",
-      url: "https://sandbox.cashfree.com/pg/orders",
+      url: "https://api.cashfree.com/pg/orders",
       headers: {
         accept: "application/json",
         "x-api-version": "2022-09-01",
