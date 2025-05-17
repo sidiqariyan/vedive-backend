@@ -92,7 +92,7 @@ app.use((req, res, next) => {
   });
   next();
 });
-
+app.use("/api/admin", require("./routes/adminRoutes"));
 // Mount routes
 const numberScraperRouter = require("./routes/NumberScraper");
 app.use("/api/numberScraper", numberScraperRouter);
@@ -102,8 +102,7 @@ app.use("/api", require("./routes/bulkMailSender"));
 app.use("/api", require("./routes/scraper"));
 app.use("/api", require("./routes/gmailSender"));
 app.use("/api/posts", require("./routes/PostRoutes"));
-app.use("/api/admin", require("./routes/adminRoutes"));
-app.use("/", require("./routes/campaignRoutes"));
+
 const cashfreeRoute = require("./routes/cashfreeRoute");
 const subscriptionRoute = require("./routes/subscriptionRoutes");
 app.use("/api/blog", require("./routes/blogRoute"));
@@ -111,6 +110,7 @@ app.use("/api/payment", cashfreeRoute);
 app.use("/api/subscription", subscriptionRoute);
 const { handleEmailScraper } = require("./routes/scraper");
 // Updated Email Scraper Endpoint
+app.use("/", require("./routes/campaignRoutes"));
 app.post("/api/email-scraper", authenticate, async (req, res) => {
   try {
     const { query, campaignName } = req.body;
