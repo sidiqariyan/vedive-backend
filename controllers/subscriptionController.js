@@ -15,11 +15,9 @@ const getUserId = (req) => req.user?.id || req.body.userId;
 
 const createSubscriptionOrder = async (req, res) => {
   try {
-    const userId = getUserId(req);
+    // Accept plan purchase without requiring authentication here
+    const userId = req.body.userId; // optional, will be used in payment note
     const { planId = "free", email, phone, name } = req.body;
-    if (!userId) {
-      return res.status(401).json({ success: false, message: "User not authenticated or userId missing" });
-    }
     if (!planConfigs[planId]) {
       return res.status(400).json({ success: false, message: "Invalid planId" });
     }
@@ -30,16 +28,21 @@ const createSubscriptionOrder = async (req, res) => {
 
     // Handle free plan immediately without payment
     if (planId === "free") {
-      let sub = await Subscription.findOne({ userId });
-      if (!sub) {
-        sub = new Subscription({ userId, plan: "free", startDate: now, endDate: null });
-      } else {
-        sub.plan = "free";
-        sub.startDate = now;
-        sub.endDate = null;
+      let sub;
+      if (userId) {
+        sub = await Subscription.findOne({ userId });
+        if (!sub) {
+          sub = new Subscription({ userId, plan: "free", startDate: now, endDate: null });
+        } else {
+          sub.plan = "free";
+          sub.startDate = now;
+          sub.endDate = null;
+        }
+        await sub.save();
+        return res.status(200).json({ success: true, message: "Free plan activated.", subscription: sub });
       }
-      await sub.save();
-      return res.status(200).json({ success: true, message: "Free plan activated.", subscription: sub });
+      // No userId: just acknowledge free plan available
+      return res.status(200).json({ success: true, message: "Free plan available for all users." });
     }
 
     // Paid plans: create order via Cashfree
@@ -70,9 +73,22 @@ const createSubscriptionOrder = async (req, res) => {
         order_amount: price,
         order_id: orderId,
         order_currency: "INR",
-        order_note: `Subscription order for plan ${planId} for user ${userId}`,
+        order_note: `Subscription order for plan ${planId}${userId ? ` for user ${userId}` : ''}`,
       },
     };
+
+    const response = await axios.request(options);
+    res.status(200).json({
+      success: true,
+      orderId,
+      paymentSessionId: response.data.payment_session_id,
+      data: response.data,
+    });
+  } catch (error) {
+    console.error("Error in createSubscriptionOrder:", error);
+    res.status(500).json({ success: false, message: error.message });
+  }
+};
 
     const response = await axios.request(options);
     res.status(200).json({
