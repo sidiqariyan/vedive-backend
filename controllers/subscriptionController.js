@@ -10,9 +10,16 @@ const planConfigs = {
   monthly: { price: 1999, duration: 30 * 24 * 60 * 60 * 1000 } // 1 month
 };
 
+// Helper to get authenticated userId
+const getUserId = (req) => {
+  if (req.user && req.user.id) return req.user.id;
+  throw new Error('Missing authenticated user ID');
+};
+
 const createSubscriptionOrder = async (req, res) => {
   try {
-    const { planId = "free", email, phone, name, userId } = req.body;
+    const userId = getUserId(req);
+    const { planId = "free", email, phone, name } = req.body;
     if (!planConfigs[planId]) {
       return res.status(400).json({ success: false, message: "Invalid planId" });
     }
@@ -75,17 +82,17 @@ const createSubscriptionOrder = async (req, res) => {
       data: response.data,
     });
   } catch (error) {
-    console.error("Error in createSubscriptionOrder:", error.message);
+    console.error("Error in createSubscriptionOrder:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
 const verifyPayment = async (req, res) => {
-  const orderid = req.params.orderid;
-  const orderToken = req.query.order_token;
-  const userId = req.query.userId || req.body.userId;
-
   try {
+    const userId = getUserId(req);
+    const orderid = req.params.orderid;
+    const orderToken = req.query.order_token;
+
     let url = `https://sandbox.cashfree.com/pg/orders/${orderid}`;
     if (orderToken) url += `?order_token=${orderToken}`;
 
@@ -134,34 +141,39 @@ const verifyPayment = async (req, res) => {
 
     res.status(200).json({ success: false, message: "Payment not completed.", orderStatus, data: response.data });
   } catch (error) {
-    console.error("Error in verifyPayment:", error.message);
+    console.error("Error in verifyPayment:", error);
     res.status(500).json({ success: false, message: error.message });
   }
 };
 
 const getSubscriptionStatus = async (req, res) => {
-  const userId = req.query.userId || req.body.userId;
-  const now = new Date();
-  let subscription = await Subscription.findOne({ userId });
+  try {
+    const userId = getUserId(req);
+    const now = new Date();
+    let subscription = await Subscription.findOne({ userId });
 
-  // If new user with no subscription, assign free plan
-  if (!subscription) {
-    subscription = new Subscription({ userId, plan: "free", startDate: now, endDate: null });
-    await subscription.save();
-  } else if (subscription.endDate && now > subscription.endDate) {
-    // Downgrade to free after expiry
-    subscription.plan = "free";
-    subscription.startDate = now;
-    subscription.endDate = null;
-    await subscription.save();
+    // If new user with no subscription, assign free plan
+    if (!subscription) {
+      subscription = new Subscription({ userId, plan: "free", startDate: now, endDate: null });
+      await subscription.save();
+    } else if (subscription.endDate && now > subscription.endDate) {
+      // Downgrade to free after expiry
+      subscription.plan = "free";
+      subscription.startDate = now;
+      subscription.endDate = null;
+      await subscription.save();
+    }
+
+    res.status(200).json({
+      success: true,
+      hasActiveSubscription: subscription.plan !== "free",
+      currentPlan: subscription.plan,
+      subscription,
+    });
+  } catch (error) {
+    console.error("Error in getSubscriptionStatus:", error);
+    res.status(500).json({ success: false, message: error.message });
   }
-
-  res.status(200).json({
-    success: true,
-    hasActiveSubscription: subscription.plan !== "free",
-    currentPlan: subscription.plan,
-    subscription,
-  });
 };
 
 module.exports = { createSubscriptionOrder, verifyPayment, getSubscriptionStatus };
