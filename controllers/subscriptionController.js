@@ -10,16 +10,16 @@ const planConfigs = {
   monthly: { price: 1999, duration: 30 * 24 * 60 * 60 * 1000 } // 1 month
 };
 
-// Helper to get authenticated userId
-const getUserId = (req) => {
-  if (req.user && req.user.id) return req.user.id;
-  throw new Error('Missing authenticated user ID');
-};
+// Helper to get userId from auth or request body
+const getUserId = (req) => req.user?.id || req.body.userId;
 
 const createSubscriptionOrder = async (req, res) => {
   try {
     const userId = getUserId(req);
     const { planId = "free", email, phone, name } = req.body;
+    if (!userId) {
+      return res.status(401).json({ success: false, message: "User not authenticated or userId missing" });
+    }
     if (!planConfigs[planId]) {
       return res.status(400).json({ success: false, message: "Invalid planId" });
     }
@@ -70,7 +70,7 @@ const createSubscriptionOrder = async (req, res) => {
         order_amount: price,
         order_id: orderId,
         order_currency: "INR",
-        order_note: `Subscription order for plan ${planId}`,
+        order_note: `Subscription order for plan ${planId} for user ${userId}`,
       },
     };
 
@@ -90,6 +90,9 @@ const createSubscriptionOrder = async (req, res) => {
 const verifyPayment = async (req, res) => {
   try {
     const userId = getUserId(req);
+    if (!userId) {
+      return res.status(401).json({ success: false, message: "User not authenticated or userId missing" });
+    }
     const orderid = req.params.orderid;
     const orderToken = req.query.order_token;
 
@@ -149,6 +152,9 @@ const verifyPayment = async (req, res) => {
 const getSubscriptionStatus = async (req, res) => {
   try {
     const userId = getUserId(req);
+    if (!userId) {
+      return res.status(401).json({ success: false, message: "User not authenticated or userId missing" });
+    }
     const now = new Date();
     let subscription = await Subscription.findOne({ userId });
 
