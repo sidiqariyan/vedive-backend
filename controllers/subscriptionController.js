@@ -15,8 +15,7 @@ const getUserId = (req) => req.user?.id || req.body.userId;
 
 const createSubscriptionOrder = async (req, res) => {
   try {
-    // Accept plan purchase without requiring authentication here
-    const userId = req.body.userId; // optional, will be used in payment note
+    const userId = req.body.userId; // optional, used for free plan instant activation or order note
     const { planId = "free", email, phone, name } = req.body;
     if (!planConfigs[planId]) {
       return res.status(400).json({ success: false, message: "Invalid planId" });
@@ -28,9 +27,8 @@ const createSubscriptionOrder = async (req, res) => {
 
     // Handle free plan immediately without payment
     if (planId === "free") {
-      let sub;
       if (userId) {
-        sub = await Subscription.findOne({ userId });
+        let sub = await Subscription.findOne({ userId });
         if (!sub) {
           sub = new Subscription({ userId, plan: "free", startDate: now, endDate: null });
         } else {
@@ -41,7 +39,7 @@ const createSubscriptionOrder = async (req, res) => {
         await sub.save();
         return res.status(200).json({ success: true, message: "Free plan activated.", subscription: sub });
       }
-      // No userId: just acknowledge free plan available
+      // No userId: just acknowledge free plan availability
       return res.status(200).json({ success: true, message: "Free plan available for all users." });
     }
 
@@ -78,7 +76,7 @@ const createSubscriptionOrder = async (req, res) => {
     };
 
     const response = await axios.request(options);
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       orderId,
       paymentSessionId: response.data.payment_session_id,
@@ -86,20 +84,7 @@ const createSubscriptionOrder = async (req, res) => {
     });
   } catch (error) {
     console.error("Error in createSubscriptionOrder:", error);
-    res.status(500).json({ success: false, message: error.message });
-  }
-};
-
-    const response = await axios.request(options);
-    res.status(200).json({
-      success: true,
-      orderId,
-      paymentSessionId: response.data.payment_session_id,
-      data: response.data,
-    });
-  } catch (error) {
-    console.error("Error in createSubscriptionOrder:", error);
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -129,13 +114,12 @@ const verifyPayment = async (req, res) => {
     const response = await axios.request(options);
     const { order_status: orderStatus, order_amount: orderAmount } = response.data;
 
-    // Determine plan by amount
     const planId = Object.keys(planConfigs).find(
       key => planConfigs[key].price === orderAmount
     ) || "free";
 
     const now = new Date();
-    const duration = planConfigs[planId].duration;
+    const { duration } = planConfigs[planId];
     const expiry = duration ? new Date(now.getTime() + duration) : null;
 
     if (orderStatus === "PAID" || orderStatus === "SUCCESS") {
@@ -148,7 +132,6 @@ const verifyPayment = async (req, res) => {
         sub.endDate = expiry;
       }
       await sub.save();
-
       return res.status(200).json({
         success: true,
         message: "Payment verified and subscription activated.",
@@ -158,10 +141,10 @@ const verifyPayment = async (req, res) => {
       });
     }
 
-    res.status(200).json({ success: false, message: "Payment not completed.", orderStatus, data: response.data });
+    return res.status(200).json({ success: false, message: "Payment not completed.", orderStatus, data: response.data });
   } catch (error) {
     console.error("Error in verifyPayment:", error);
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
@@ -174,19 +157,17 @@ const getSubscriptionStatus = async (req, res) => {
     const now = new Date();
     let subscription = await Subscription.findOne({ userId });
 
-    // If new user with no subscription, assign free plan
     if (!subscription) {
       subscription = new Subscription({ userId, plan: "free", startDate: now, endDate: null });
       await subscription.save();
     } else if (subscription.endDate && now > subscription.endDate) {
-      // Downgrade to free after expiry
       subscription.plan = "free";
       subscription.startDate = now;
       subscription.endDate = null;
       await subscription.save();
     }
 
-    res.status(200).json({
+    return res.status(200).json({
       success: true,
       hasActiveSubscription: subscription.plan !== "free",
       currentPlan: subscription.plan,
@@ -194,7 +175,7 @@ const getSubscriptionStatus = async (req, res) => {
     });
   } catch (error) {
     console.error("Error in getSubscriptionStatus:", error);
-    res.status(500).json({ success: false, message: error.message });
+    return res.status(500).json({ success: false, message: error.message });
   }
 };
 
