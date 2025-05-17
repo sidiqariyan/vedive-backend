@@ -103,7 +103,7 @@ app.use("/api", require("./routes/scraper"));
 app.use("/api", require("./routes/gmailSender"));
 app.use("/api/posts", require("./routes/PostRoutes"));
 app.use("/", require("./routes/campaignRoutes"));
-
+app.use("/api/admin", require("./routes/adminRoutes"));
 const cashfreeRoute = require("./routes/cashfreeRoute");
 const subscriptionRoute = require("./routes/subscriptionRoutes");
 app.use("/api/blog", require("./routes/blogRoute"));
