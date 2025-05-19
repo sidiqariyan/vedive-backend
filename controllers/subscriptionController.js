@@ -272,5 +272,9 @@ async function getSubscriptionStatus(req, res, next) {
   } catch (err) { next(err); }
 }
 
-module.exports = { createSubscriptionOrder, verifyPayment, webhookHandler, getSubscriptionStatus };
-
+module.exports = {
+  createSubscriptionOrder,
+  verifyPayment,
+  webhookHandler,
+  getSubscriptionStatus,
+};
