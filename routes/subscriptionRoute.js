@@ -6,7 +6,7 @@ const {
   webhookHandler,
   getSubscriptionStatus
 } = require('../controllers/subscriptionController');
-const { authenticate } = require('../middleware/auth');
+const { authenticate } = require('../middleware/authMiddleware');
 
 // Create subscription order
 router.post('/create', authenticate, createSubscriptionOrder);
