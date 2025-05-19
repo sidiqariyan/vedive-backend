@@ -1,11 +1,24 @@
-const mongoose = require('mongoose');
+const mongoose = require("mongoose");
 
 const subscriptionSchema = new mongoose.Schema({
-  userId:     { type: mongoose.Schema.Types.ObjectId, ref: 'User', required: true, index: true },
-  plan:       { type: String, enum: ['free','daily','weekly','monthly','pending'], required: true },
-  startDate:  { type: Date, required: true },
-  endDate:    { type: Date, default: null },
-  orderId:    { type: String, required: function() { return this.plan === 'pending'; }, index: true },
-}, { timestamps: true });
+  userId: {
+    type: String,
+    required: true,
+    unique: true,
+  },
+  plan: {
+    type: String,
+    enum: ["free", "starter", "business", "enterprise"],
+    default: "free",
+  },
+  startDate: {
+    type: Date,
+    default: Date.now,
+  },
+  endDate: {
+    type: Date,
+    default: null,
+  },
+});
 
-module.exports = mongoose.model('SubscriptionPlan', subscriptionSchema);
+module.exports = mongoose.model("Subscription", subscriptionSchema);
