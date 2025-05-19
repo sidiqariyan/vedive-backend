@@ -104,7 +104,7 @@ app.use("/api", require("./routes/gmailSender"));
 app.use("/api/posts", require("./routes/PostRoutes"));
 
 const cashfreeRoute = require("./routes/cashfreeRoute");
-const subscriptionRoute = require("./routes/subscriptionRoutes");
+const subscriptionRoute = require("./routes/subscriptionRoute");
 app.use("/api/blog", require("./routes/blogRoute"));
 app.use("/api/payment", cashfreeRoute);
 app.use("/api/subscription", subscriptionRoute);
