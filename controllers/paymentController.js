@@ -53,7 +53,7 @@ const checkStatus = async (req, res) => {
   try {
     const options = {
       method: "GET",
-      url: `https://sandbox.cashfree.com/pg/orders/${orderid}`,
+      url: `https://api.cashfree.com/pg/orders/${orderid}`,
       headers: {
         accept: "application/json",
         "x-api-version": "2022-09-01",
