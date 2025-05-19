@@ -1,6 +1,5 @@
-const fetch = require('node-fetch');
-const { app_id, secret_key } = require('../config/secret');
 const crypto = require('crypto');
+const { app_id, secret_key } = require('../config/secret');
 
 // Production base URL
 const BASE_URL = 'https://api.cashfree.com/pg';
