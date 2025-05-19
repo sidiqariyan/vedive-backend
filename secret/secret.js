@@ -9,5 +9,5 @@ if (!CASHFREE_APP_ID || !CASHFREE_SECRET_KEY) {
 module.exports = {
   app_id: CASHFREE_APP_ID,
   secret_key: CASHFREE_SECRET_KEY,
-  environment: CASHFREE_ENV || 'PRODUCTION',
+  environment: CASHFREE_ENV || 'PROD',
 };
