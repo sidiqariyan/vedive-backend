@@ -1,182 +1,209 @@
+// controllers/subscriptionController.js
 const axios = require("axios");
-const { secret_key, app_id } = require("../config/secret");
+const mongoose = require("mongoose");
 const Subscription = require("../models/SubscriptionPlan");
+const { app_id, secret_key, environment } = require("../config/secret");
+const { v4: uuidv4 } = require("uuid");
 
 // Plan configurations: price (INR) and duration in milliseconds
 const planConfigs = {
-  free: { price: 0, duration: 0 },       // lifetime free
-  daily: { price: 99, duration: 1 * 24 * 60 * 60 * 1000 },    // 1 day
-  weekly: { price: 499, duration: 7 * 24 * 60 * 60 * 1000 },  // 1 week
-  monthly: { price: 1999, duration: 30 * 24 * 60 * 60 * 1000 } // 1 month
+  free:    { price: 0,     duration: 0 },
+  daily:   { price: 99,    duration: 1  * 24 * 60 * 60 * 1000 },
+  weekly:  { price: 499,   duration: 7  * 24 * 60 * 60 * 1000 },
+  monthly: { price: 1999,  duration: 30 * 24 * 60 * 60 * 1000 },
 };
 
-// Helper to get userId from auth or request body
-const getUserId = (req) => req.user?.id || req.body.userId;
+const CASHFREE_BASE_URL = environment === "PROD"
+  ? "https://api.cashfree.com"
+  : "https://sandbox.cashfree.com";
 
-const createSubscriptionOrder = async (req, res) => {
+/**
+ * Create a new subscription order (or activate free plan immediately)
+ */
+async function createSubscriptionOrder(req, res, next) {
+  const session = await mongoose.startSession();
   try {
-    const userId = req.body.userId; // optional, used for free plan instant activation or order note
+    session.startTransaction();
+
+    const userId = req.user?._id;
     const { planId = "free", email, phone, name } = req.body;
+
+    // Validate plan
     if (!planConfigs[planId]) {
       return res.status(400).json({ success: false, message: "Invalid planId" });
     }
 
-    const now = new Date();
     const { price, duration } = planConfigs[planId];
+    const now = new Date();
     const expiry = duration ? new Date(now.getTime() + duration) : null;
 
-    // Handle free plan immediately without payment
+    // Free plan: activate instantly
     if (planId === "free") {
-      if (userId) {
-        let sub = await Subscription.findOne({ userId });
-        if (!sub) {
-          sub = new Subscription({ userId, plan: "free", startDate: now, endDate: null });
-        } else {
-          sub.plan = "free";
-          sub.startDate = now;
-          sub.endDate = null;
-        }
-        await sub.save();
-        return res.status(200).json({ success: true, message: "Free plan activated.", subscription: sub });
+      let sub = await Subscription.findOne({ userId }).session(session);
+      if (!sub) {
+        sub = new Subscription({ userId, plan: "free", startDate: now, endDate: null });
+      } else {
+        sub.plan = "free";
+        sub.startDate = now;
+        sub.endDate = null;
       }
-      // No userId: just acknowledge free plan availability
-      return res.status(200).json({ success: true, message: "Free plan available for all users." });
+      await sub.save({ session });
+      await session.commitTransaction();
+      return res.json({ success: true, message: "Free plan activated.", subscription: sub });
     }
 
-    // Paid plans: create order via Cashfree
-    const orderId = "ORID" + Date.now();
-    const customerId = "CID" + Date.now();
+    // Paid plan: require user info
+    if (!email || !phone || !name) {
+      return res.status(400).json({ success: false, message: "Missing customer details" });
+    }
 
-    const options = {
-      method: "POST",
-      url: "https://api.cashfree.com/pg/orders",
-      headers: {
-        accept: "application/json",
-        "x-api-version": "2022-09-01",
-        "content-type": "application/json",
-        "x-client-id": app_id,
-        "x-client-secret": secret_key,
+    // Build order identifiers
+    const orderId    = `ORID-${uuidv4()}`;
+    const customerId = `CID-${uuidv4()}`;
+
+    // Create Cashfree order
+    const payload = {
+      customer_details: {
+        customer_id: customerId,
+        customer_email: email,
+        customer_phone: phone,
+        customer_name: name,
       },
-      data: {
-        customer_details: {
-          customer_id: customerId,
-          customer_email: email || "customer@example.com",
-          customer_phone: phone || "1234567890",
-          customer_name: name || "Customer Name",
-        },
-        order_meta: {
-          notify_url: process.env.CASHFREE_NOTIFY_URL || "https://your-notify-url.com",
-          payment_methods: "cc,dc,upi",
-        },
-        order_amount: price,
-        order_id: orderId,
-        order_currency: "INR",
-        order_note: `Subscription order for plan ${planId}${userId ? ` for user ${userId}` : ''}`,
+      order_meta: {
+        notify_url:    process.env.CASHFREE_NOTIFY_URL,
+        payment_methods: "cc,dc,upi",
       },
+      order_amount:   price,
+      order_id:       orderId,
+      order_currency: "INR",
+      order_note:     `Subscription ${planId}`,
     };
 
-    const response = await axios.request(options);
-    return res.status(200).json({
+    const response = await axios.post(
+      `${CASHFREE_BASE_URL}/pg/orders`,
+      payload,
+      {
+        headers: {
+          accept:           "application/json",
+          "x-api-version":  "2022-09-01",
+          "content-type":   "application/json",
+          "x-client-id":    app_id,
+          "x-client-secret": secret_key,
+        },
+      }
+    );
+
+    await session.commitTransaction();
+    return res.json({
       success: true,
       orderId,
       paymentSessionId: response.data.payment_session_id,
       data: response.data,
     });
-  } catch (error) {
-    console.error("Error in createSubscriptionOrder:", error);
-    return res.status(500).json({ success: false, message: error.message });
+  } catch (err) {
+    await session.abortTransaction();
+    console.error("createSubscriptionOrder error:", err.response?.data || err.message);
+    next(err);
+  } finally {
+    session.endSession();
   }
-};
+}
 
-const verifyPayment = async (req, res) => {
+/**
+ * Verify a payment and activate the subscription
+ */
+async function verifyPayment(req, res, next) {
   try {
-    const userId = getUserId(req);
+    const userId = req.user?._id;
+    const { orderid } = req.params;
     if (!userId) {
-      return res.status(401).json({ success: false, message: "User not authenticated or userId missing" });
+      return res.status(401).json({ success: false, message: "Authentication required" });
     }
-    const orderid = req.params.orderid;
-    const orderToken = req.query.order_token;
+    if (!orderid) {
+      return res.status(400).json({ success: false, message: "Order ID missing" });
+    }
 
-    let url = `https://sandbox.cashfree.com/pg/orders/${orderid}`;
-    if (orderToken) url += `?order_token=${orderToken}`;
-
-    const options = {
-      method: "GET",
-      url,
+    const url = `${CASHFREE_BASE_URL}/pg/orders/${encodeURIComponent(orderid)}`;
+    const response = await axios.get(url, {
       headers: {
-        accept: "application/json",
-        "x-api-version": "2022-09-01",
-        "x-client-id": app_id,
+        accept:           "application/json",
+        "x-api-version":  "2022-09-01",
+        "x-client-id":    app_id,
         "x-client-secret": secret_key,
       },
-    };
-
-    const response = await axios.request(options);
-    const { order_status: orderStatus, order_amount: orderAmount } = response.data;
-
-    const planId = Object.keys(planConfigs).find(
-      key => planConfigs[key].price === orderAmount
-    ) || "free";
-
-    const now = new Date();
-    const { duration } = planConfigs[planId];
-    const expiry = duration ? new Date(now.getTime() + duration) : null;
-
-    if (orderStatus === "PAID" || orderStatus === "SUCCESS") {
-      let sub = await Subscription.findOne({ userId });
-      if (!sub) {
-        sub = new Subscription({ userId, plan: planId, startDate: now, endDate: expiry });
-      } else {
-        sub.plan = planId;
-        sub.startDate = now;
-        sub.endDate = expiry;
-      }
-      await sub.save();
-      return res.status(200).json({
-        success: true,
-        message: "Payment verified and subscription activated.",
-        orderStatus,
-        subscription: sub,
-        data: response.data,
-      });
-    }
-
-    return res.status(200).json({ success: false, message: "Payment not completed.", orderStatus, data: response.data });
-  } catch (error) {
-    console.error("Error in verifyPayment:", error);
-    return res.status(500).json({ success: false, message: error.message });
-  }
-};
-
-const getSubscriptionStatus = async (req, res) => {
-  try {
-    const userId = getUserId(req);
-    if (!userId) {
-      return res.status(401).json({ success: false, message: "User not authenticated or userId missing" });
-    }
-    const now = new Date();
-    let subscription = await Subscription.findOne({ userId });
-
-    if (!subscription) {
-      subscription = new Subscription({ userId, plan: "free", startDate: now, endDate: null });
-      await subscription.save();
-    } else if (subscription.endDate && now > subscription.endDate) {
-      subscription.plan = "free";
-      subscription.startDate = now;
-      subscription.endDate = null;
-      await subscription.save();
-    }
-
-    return res.status(200).json({
-      success: true,
-      hasActiveSubscription: subscription.plan !== "free",
-      currentPlan: subscription.plan,
-      subscription,
     });
-  } catch (error) {
-    console.error("Error in getSubscriptionStatus:", error);
-    return res.status(500).json({ success: false, message: error.message });
-  }
-};
 
-module.exports = { createSubscriptionOrder, verifyPayment, getSubscriptionStatus };
+    const { order_status: status, order_amount: amount } = response.data;
+    if (status !== "PAID" && status !== "SUCCESS") {
+      return res.status(200).json({ success: false, message: "Payment incomplete", status, data: response.data });
+    }
+
+    // Determine plan from amount
+    const planId = Object.entries(planConfigs).find(([, cfg]) => cfg.price === amount)?.[0] || "free";
+    const now = new Date();
+    const expiry = planConfigs[planId].duration
+      ? new Date(now.getTime() + planConfigs[planId].duration)
+      : null;
+
+    let sub = await Subscription.findOne({ userId });
+    if (!sub) {
+      sub = new Subscription({ userId, plan: planId, startDate: now, endDate: expiry });
+    } else {
+      sub.plan = planId;
+      sub.startDate = now;
+      sub.endDate = expiry;
+    }
+    await sub.save();
+
+    return res.json({
+      success: true,
+      message: "Subscription activated",
+      subscription: sub,
+      data: response.data,
+    });
+  } catch (err) {
+    console.error("verifyPayment error:", err.response?.data || err.message);
+    next(err);
+  }
+}
+
+/**
+ * Retrieve current subscription status
+ */
+async function getSubscriptionStatus(req, res, next) {
+  try {
+    const userId = req.user?._id;
+    if (!userId) {
+      return res.status(401).json({ success: false, message: "Authentication required" });
+    }
+
+    const now = new Date();
+    let sub = await Subscription.findOne({ userId });
+    if (!sub) {
+      sub = new Subscription({ userId, plan: "free", startDate: now, endDate: null });
+      await sub.save();
+    } else if (sub.endDate && now > sub.endDate) {
+      // Expired → downgrade to free
+      sub.plan = "free";
+      sub.startDate = now;
+      sub.endDate = null;
+      await sub.save();
+    }
+
+    return res.json({
+      success: true,
+      hasActiveSubscription: sub.plan !== "free",
+      currentPlan: sub.plan,
+      subscription: sub,
+    });
+  } catch (err) {
+    console.error("getSubscriptionStatus error:", err.message);
+    next(err);
+  }
+}
+
+module.exports = {
+  createSubscriptionOrder,
+  verifyPayment,
+  getSubscriptionStatus,
+};
