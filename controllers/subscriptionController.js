@@ -267,7 +267,12 @@ async function webhookHandler(req, res, next) {
 
 async function getSubscriptionStatus(req, res, next) {
   try {
-    const status = await subscriptionService.getStatus(req.user._id);
+    const userId = req.user._id;
+    const status = await subscriptionService.getStatus(userId);
+    // Also fetch user fields
+    const User = require('../models/User');
+    const user = await User.findById(userId).select('currentPlan subscriptionEndDate isPaidUser');
+    return res.json({ success: true, ...status, currentPlan: user.currentPlan, subscriptionEndDate: user.subscriptionEndDate, isPaidUser: user.isPaidUser });
     res.json({ success: true, ...status });
   } catch (err) { next(err); }
 }
