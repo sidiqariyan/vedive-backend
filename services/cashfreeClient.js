@@ -71,21 +71,3 @@ async function getOrder(orderId) {
 }
 
 module.exports = { createOrder, getOrder };
-    payload.signature = generateSignature({
-      order_id: payload.order_id,
-      order_amount: payload.order_amount,
-      order_currency: payload.order_currency
-    });
-
-    const { body } = await client.post('pg/orders', { json: payload });
-    if (body.status !== 'ACTIVE') {
-      throw new Error(body.message || 'Cashfree order creation failed');
-    }
-    return body;
-  },
-
-  async getOrder(orderId) {
-    const { body } = await client.get(`pg/orders/${encodeURIComponent(orderId)}`);
-    return body;
-  },
-};
