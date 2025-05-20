@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 const cashfree = require('../services/cashfreeClient');
-const Subscription = require('../models/Subscription');
+const Subscription = require('../models/SubscriptionPlan');
 const { PLANS } = require('../config/plans');
 const { frontendUrl, notifyUrl } = require('../config/secret');
 
