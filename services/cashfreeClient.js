@@ -48,7 +48,7 @@ async function createOrder(orderData) {
       requestBody,
       {
         headers: {
-          'x-client-id': appid,
+          'x-client-id': appId,
           'x-client-secret': secretKey,
           'Content-Type': 'application/json'
         }
@@ -84,7 +84,7 @@ async function getOrder(orderId) {
       `${cashfreeApiBaseUrl}/orders/${orderId}`,
       {
         headers: {
-          'x-client-id': appid,
+          'x-client-id': appId,
           'x-client-secret': secretKey
         }
       }
