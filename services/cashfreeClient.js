@@ -1,5 +1,5 @@
 const axios = require('axios');
-const {  appId, secretKey } = require('../config/secret');
+const { cashfreeAppId, cashfreeSecretKey } = require('../config/secret');
 
 // Define Cashfree API base URL - update this with the correct endpoint
 const cashfreeApiBaseUrl = 'https://api.cashfree.com/pg/v2';
@@ -20,8 +20,8 @@ async function createOrder(orderData) {
     // Add logging to debug request data
     console.log('Cashfree API Request:', {
       url: `${cashfreeApiBaseUrl}/orders`,
-      appId: appId ? 'Present (masked)' : 'Missing',
-      secretKey: secretKey ? 'Present (masked)' : 'Missing',
+      appId: cashfreeAppId ? 'Present (masked)' : 'Missing',
+      secretKey: cashfreeSecretKey ? 'Present (masked)' : 'Missing',
       orderId: orderData.orderId,
       amount: orderData.amount
     });
@@ -48,8 +48,8 @@ async function createOrder(orderData) {
       requestBody,
       {
         headers: {
-          'x-client-id': appId,
-          'x-client-secret': secretKey,
+          'x-client-id': cashfreeAppId,
+          'x-client-secret': cashfreeSecretKey,
           'Content-Type': 'application/json'
         }
       }
@@ -84,8 +84,8 @@ async function getOrder(orderId) {
       `${cashfreeApiBaseUrl}/orders/${orderId}`,
       {
         headers: {
-          'x-client-id': appId,
-          'x-client-secret': secretKey
+          'x-client-id': cashfreeAppId,
+          'x-client-secret': cashfreeSecretKey
         }
       }
     );
