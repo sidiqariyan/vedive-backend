@@ -12,32 +12,25 @@ async function createSubscriptionOrder(req, res, next) {
     const { planId } = req.body;
     if (!PLANS[planId]) return res.status(400).json({ error: 'Invalid planId' });
     
+    // Generate a unique ID
     const orderId = uuidv4();
-    if (!orderId) {
-      return res.status(500).json({ error: 'Failed to generate order ID' });
-    }
     
     const now = new Date();
     const plan = PLANS[planId];
     const expiry = plan.durationMs ? new Date(now.getTime() + plan.durationMs) : null;
     
-    // Check if user already has a pending subscription
-    const existingPending = await Subscription.findOne({
-      userId: req.user._id,
-      plan: 'pending'
+    // Check for existing pending subscriptions and clean them up
+    await Subscription.deleteMany({ 
+      userId: req.user._id, 
+      plan: 'pending' 
     }).session(session);
-    
-    if (existingPending) {
-      // Either delete it or use its orderId
-      await Subscription.deleteOne({ _id: existingPending._id }).session(session);
-    }
     
     const sub = new Subscription({
       userId:          req.user._id,
       plan:            'pending',
       startDate:       now,
       endDate:         expiry,
-      cashfreeOrderId: orderId, // Ensure this is always set
+      cashfreeOrderId: orderId, // This will never be null now
     });
     
     await sub.save({ session });
@@ -65,6 +58,10 @@ async function createSubscriptionOrder(req, res, next) {
     return next(err);
   }
 }
+
+
+
+
 async function verifyPayment(req, res, next) {
   try {
     const { orderid } = req.params;
