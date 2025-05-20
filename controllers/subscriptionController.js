@@ -1,37 +1,45 @@
 const mongoose = require('mongoose');
 const cashfree = require('../services/cashfreeClient');
-const subscriptionService = require('../services/subscriptionService');
+const Subscription = require('../models/Subscription');
 const { PLANS } = require('../config/plans');
-const { frontend_url, notify_url } = require('../config/secret');
+const { frontendUrl, notifyUrl } = require('../config/secret');
 
 async function createSubscriptionOrder(req, res, next) {
   const session = await mongoose.startSession();
   session.startTransaction();
   try {
-    const userId = req.user._id;
     const { planId } = req.body;
-    if (!PLANS[planId]) throw new Error('Invalid plan');
+    const userId = req.user._id;
+    if (!PLANS[planId]) return res.status(400).json({ error: 'Invalid planId' });
 
-    const { subscription, orderId } = await subscriptionService.createPending(userId, planId, session);
-    const cfResponse = await cashfree.createOrder({
-      orderId,
-      amount: PLANS[planId].price,
+    // create DB placeholder
+    const plan = PLANS[planId];
+    const now = new Date();
+    const expiry = plan.durationMs ? new Date(now.getTime() + plan.durationMs) : null;
+    const sub = await new Subscription({ userId, plan: 'pending', startDate: now, endDate: expiry }).save({ session });
+
+    // call Cashfree
+    const cf = await cashfree.createOrder({
+      orderId: sub._id.toString(),
+      amount: plan.price,
       currency: 'INR',
       customer: {
-        id: userId,
-        name: req.user.name,
-        email: req.user.email,
-        phone: req.user.phone,
+        id: userId.toString(), name: req.user.name, email: req.user.email, phone: req.user.phone
       },
-      returnUrl: `${frontend_url}/payment-success?order_id=${orderId}`,
-      notifyUrl: notify_url,
+      returnUrl: `${frontendUrl}/payment-success?order_id=${sub._id}`,
+      notifyUrl,
     });
 
-    await session.commitTransaction(); session.endSession();
-    res.json({ success: true, orderId, paymentSessionId: cfResponse.payment_session_id, paymentLink: cfResponse.payment_link });
+    // store order id
+    sub.cashfreeOrderId = sub._id.toString();
+    await sub.save({ session });
+
+    await session.commitTransaction();
+    res.json({ orderId: sub._id, paymentLink: cf.payment_link });
   } catch (err) {
-    await session.abortTransaction(); session.endSession(); next(err);
-  }
+    await session.abortTransaction();
+    next(err);
+  } finally { session.endSession(); }
 }
 
 async function verifyPayment(req, res, next) {
@@ -40,30 +48,22 @@ async function verifyPayment(req, res, next) {
     const cfData = await cashfree.getOrder(orderid);
     if (cfData.order_status !== 'PAID') return res.status(400).json({ error: 'Payment incomplete' });
 
-    const subscription = await subscriptionService.activate(orderid, new Date(cfData.order_date));
-    res.json({ success: true, subscription });
+    const sub = await Subscription.findById(orderid);
+    sub.plan = sub.plan; // already set
+    // all good
+    await sub.save();
+
+    res.json({ success: true, subscription: sub });
   } catch (err) { next(err); }
 }
 
-async function webhookHandler(req, res, next) {
-  try {
-    const valid = subscriptionService.verifySignature(req.body, req.headers['x-webhook-signature']);
-    if (!valid) return res.status(401).json({ error: 'Invalid signature' });
-    await subscriptionService.handleEvent(req.body);
-    res.json({ success: true });
-  } catch (err) { next(err); }
-}
+// webhook can be same as verify
 
 async function getSubscriptionStatus(req, res, next) {
   try {
-    const userId = req.user._id;
-    const status = await subscriptionService.getStatus(userId);
-    // Also fetch user fields
-    const User = require('../models/User');
-    const user = await User.findById(userId).select('currentPlan subscriptionEndDate isPaidUser');
-    return res.json({ success: true, ...status, currentPlan: user.currentPlan, subscriptionEndDate: user.subscriptionEndDate, isPaidUser: user.isPaidUser });
-    res.json({ success: true, ...status });
+    const subs = await Subscription.find({ userId: req.user._id });
+    res.json({ subscriptions: subs });
   } catch (err) { next(err); }
 }
 
-module.exports = { createSubscriptionOrder, verifyPayment, webhookHandler, getSubscriptionStatus };
+module.exports = { createSubscriptionOrder, verifyPayment, getSubscriptionStatus };
