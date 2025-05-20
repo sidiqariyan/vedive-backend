@@ -38,7 +38,7 @@ async function createOrder(orderData) {
         customer_id: orderData.customer.id,
         customer_name: orderData.customer.name || undefined,
         customer_email: orderData.customer.email || undefined,
-        customer_phone: orderData.customer.phone
+        customer_phone: "9999999999"
       }
     };
     
