@@ -1,6 +1,7 @@
+// 📁 controllers/subscriptionController.js
 const mongoose = require('mongoose');
-const cashfree = require('../services/cashfreeClient');
 const Subscription = require('../models/Subscription');
+const cashfree = require('../services/cashfreeClient');
 const { PLANS } = require('../config/plans');
 const { frontendUrl, notifyUrl } = require('../config/secret');
 const { v4: uuidv4 } = require('uuid');
@@ -10,33 +11,31 @@ async function createSubscriptionOrder(req, res, next) {
   session.startTransaction();
   try {
     const { planId } = req.body;
-    const userId = req.user._id;
     if (!PLANS[planId]) return res.status(400).json({ error: 'Invalid planId' });
 
-    // generate unique orderId
+    // 1) Generate unique order ID
     const orderId = uuidv4();
 
-    // create DB placeholder
-    const plan = PLANS[planId];
-    const now = new Date();
-    const expiry = plan.durationMs ? new Date(now.getTime() + plan.durationMs) : null;
-    const sub = new Subscription({
-      userId,
-      plan: 'pending',
-      startDate: now,
-      endDate: expiry,
+    // 2) Create pending subscription record
+    const now    = new Date();
+    const expiry = PLANS[planId].durationMs ? new Date(now.getTime() + PLANS[planId].durationMs) : null;
+    const sub    = new Subscription({
+      userId:          req.user._id,
+      plan:            'pending',
+      startDate:       now,
+      endDate:         expiry,
       cashfreeOrderId: orderId,
     });
     await sub.save({ session });
 
-    // call Cashfree API
+    // 3) Call Cashfree to create the order
     const cf = await cashfree.createOrder({
       orderId,
-      amount: plan.price,
+      amount:   PLANS[planId].price,
       currency: 'INR',
       customer: {
-        id: userId.toString(),
-        name: req.user.name,
+        id:    req.user._id.toString(),
+        name:  req.user.name,
         email: req.user.email,
         phone: req.user.phone,
       },
@@ -62,13 +61,19 @@ async function verifyPayment(req, res, next) {
   try {
     const { orderid } = req.params;
     const cfData = await cashfree.getOrder(orderid);
-    if (cfData.order_status !== 'PAID') return res.status(400).json({ error: 'Payment incomplete' });
+    if (cfData.order_status !== 'PAID') {
+      return res.status(400).json({ error: 'Payment incomplete' });
+    }
 
-    // activate in DB
+    // Activate in DB
     const sub = await Subscription.findOne({ cashfreeOrderId: orderid });
-    if (!sub) return res.status(404).json({ error: 'Subscription not found' });
+    if (!sub) {
+      return res.status(404).json({ error: 'Subscription not found' });
+    }
 
-    sub.plan = sub.plan; // or maintain previous planRequested if needed
+    // Flip from pending → actual plan
+    // (If you want to track planRequested, store it in the doc and use it here)
+    sub.plan = sub.plan; 
     await sub.save();
 
     return res.json({ success: true, subscription: sub });
@@ -79,12 +84,10 @@ async function verifyPayment(req, res, next) {
 
 async function getSubscriptionStatus(req, res, next) {
   try {
-    // Fetch the latest subscription for the user
     const sub = await Subscription
       .findOne({ userId: req.user._id })
       .sort({ createdAt: -1 });
 
-    // Default values for free user
     let currentPlan = 'free';
     let subscriptionEndDate = null;
     let isPaidUser = false;
@@ -109,5 +112,4 @@ async function getSubscriptionStatus(req, res, next) {
   }
 }
 
-module.exports = { createSubscriptionOrder, verifyPayment, getSubscriptionStatus }; { createSubscriptionOrder, verifyPayment, getSubscriptionStatus };
-
+module.exports = { createSubscriptionOrder, verifyPayment, getSubscriptionStatus };
