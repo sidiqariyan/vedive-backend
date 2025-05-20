@@ -1,6 +1,6 @@
 const mongoose = require('mongoose');
 const cashfree = require('../services/cashfreeClient');
-const Subscription = require('../models/SubscriptionPlan');
+const Subscription = require('../models/Subscription');
 const { PLANS } = require('../config/plans');
 const { frontendUrl, notifyUrl } = require('../config/secret');
 const { v4: uuidv4 } = require('uuid');
@@ -79,12 +79,34 @@ async function verifyPayment(req, res, next) {
 
 async function getSubscriptionStatus(req, res, next) {
   try {
-    const subs = await Subscription.find({ userId: req.user._id });
-    return res.json({ subscriptions: subs });
+    // Fetch the latest subscription for the user
+    const sub = await Subscription
+      .findOne({ userId: req.user._id })
+      .sort({ createdAt: -1 });
+
+    // Default values for free user
+    let currentPlan = 'free';
+    let subscriptionEndDate = null;
+    let isPaidUser = false;
+
+    if (sub && sub.plan !== 'pending') {
+      const now = Date.now();
+      if (!sub.endDate || sub.endDate.getTime() > now) {
+        currentPlan = sub.plan;
+        subscriptionEndDate = sub.endDate;
+        isPaidUser = sub.plan !== 'free';
+      }
+    }
+
+    return res.json({
+      success: true,
+      currentPlan,
+      subscriptionEndDate,
+      isPaidUser,
+    });
   } catch (err) {
     return next(err);
   }
 }
 
-module.exports = { createSubscriptionOrder, verifyPayment, getSubscriptionStatus };
-
+module.exports = { createSubscriptionOrder, verifyPayment, getSubscriptionStatus }; { createSubscriptionOrder, verifyPayment, getSubscriptionStatus };
