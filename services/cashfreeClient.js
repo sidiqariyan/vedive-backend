@@ -20,8 +20,8 @@ async function createOrder(orderData) {
     // Add logging to debug request data
     console.log('Cashfree API Request:', {
       url: `${cashfreeApiBaseUrl}/orders`,
-      appId: cashfreeAppId ? 'Present (masked)' : 'Missing',
-      secretKey: cashfreeSecretKey ? 'Present (masked)' : 'Missing',
+      appId: appId ? 'Present (masked)' : 'Missing',
+      secretKey: secretKey ? 'Present (masked)' : 'Missing',
       orderId: orderData.orderId,
       amount: orderData.amount
     });
@@ -48,8 +48,8 @@ async function createOrder(orderData) {
       requestBody,
       {
         headers: {
-          'x-client-id': cashfreeAppId,
-          'x-client-secret': cashfreeSecretKey,
+          'x-client-id': appid,
+          'x-client-secret': secretKey,
           'Content-Type': 'application/json'
         }
       }
@@ -84,8 +84,8 @@ async function getOrder(orderId) {
       `${cashfreeApiBaseUrl}/orders/${orderId}`,
       {
         headers: {
-          'x-client-id': cashfreeAppId,
-          'x-client-secret': cashfreeSecretKey
+          'x-client-id': appid,
+          'x-client-secret': secretKey
         }
       }
     );
