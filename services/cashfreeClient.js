@@ -1,5 +1,8 @@
 const axios = require('axios');
-const { cashfreeAppId, cashfreeSecretKey, cashfreeApiBaseUrl } = require('../config/secret');
+const { cashfreeAppId, cashfreeSecretKey } = require('../config/secret');
+
+// Define Cashfree API base URL - update this with the correct endpoint
+const cashfreeApiBaseUrl = 'https://api.cashfree.com/pg/v2';
 
 /**
  * Creates a payment order with Cashfree
@@ -14,6 +17,15 @@ const { cashfreeAppId, cashfreeSecretKey, cashfreeApiBaseUrl } = require('../con
  */
 async function createOrder(orderData) {
   try {
+    // Add logging to debug request data
+    console.log('Cashfree API Request:', {
+      url: `${cashfreeApiBaseUrl}/orders`,
+      appId: cashfreeAppId ? 'Present (masked)' : 'Missing',
+      secretKey: cashfreeSecretKey ? 'Present (masked)' : 'Missing',
+      orderId: orderData.orderId,
+      amount: orderData.amount
+    });
+    
     // Format the request body according to Cashfree API v2 requirements
     const requestBody = {
       order_id: orderData.orderId,
