@@ -11,7 +11,7 @@ module.exports = {
       : null;
 
     // Fetch or initialize
-    let sub = await Subscription.findOne({ userId }).session(session);
+   let sub = await Subscription.findOne({ userId }).session(session);
     if (!sub) sub = new Subscription({ userId });({ userId }).session(session);
     if (!sub) sub = new Subscription({ userId });
 
