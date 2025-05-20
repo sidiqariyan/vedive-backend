@@ -1,5 +1,7 @@
 const axios = require('axios');
-const { cashfreeAppId, cashfreeSecretKey } = require('../config/secret');
+// const { cashfreeAppId, cashfreeSecretKey } = require('../config/secret');
+const cashfreeAppId= "92091559e09e1ef5eb102b66b4519029"
+  const cashfreeSecretKey = "cfsk_ma_prod_952ee152bb1a344252f96a977558f926_f8ec5951"
 
 // Define Cashfree API base URL - update this with the correct endpoint
 const cashfreeApiBaseUrl = 'https://api.cashfree.com/pg/v2';
