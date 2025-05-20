@@ -5,8 +5,15 @@ const SubscriptionSchema = new mongoose.Schema({
   plan:            { type: String, enum: ['free','starter','business','enterprise','pending'], required: true },
   startDate:       { type: Date, required: true },
   endDate:         { type: Date, default: null },
-  // Make this required to prevent null values
-  cashfreeOrderId: { type: String, required: true, index: { unique: true } },
+  // Use default to ensure this is never null
+  cashfreeOrderId: { 
+    type: String, 
+    default: function() {
+      const { v4: uuidv4 } = require('uuid');
+      return 'default-' + uuidv4();
+    },
+    index: { unique: true } 
+  },
 }, { timestamps: true });
 
 module.exports = mongoose.model('Subscription', SubscriptionSchema);
