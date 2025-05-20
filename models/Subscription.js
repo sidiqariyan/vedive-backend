@@ -1,3 +1,4 @@
+// 📁 models/Subscription.js
 const mongoose = require('mongoose');
 
 const SubscriptionSchema = new mongoose.Schema({
@@ -5,7 +6,7 @@ const SubscriptionSchema = new mongoose.Schema({
   plan:            { type: String, enum: ['free','daily','weekly','monthly','pending'], required: true },
   startDate:       { type: Date,   required: true },
   endDate:         { type: Date,   default: null },
-  cashfreeOrderId: { type: String, default: null, index: { unique: true, sparse: true } },
+  cashfreeOrderId: { type: String, index: { unique: true, sparse: true } },
 }, { timestamps: true });
 
 module.exports = mongoose.model('Subscription', SubscriptionSchema);
