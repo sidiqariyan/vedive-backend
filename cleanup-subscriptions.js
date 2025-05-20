@@ -50,14 +50,6 @@ if (!mongoUri) {
 
 console.log(`Using MongoDB URI: ${mongoUri.substring(0, 20)}...`);
 
-// Connect to MongoDB
-mongoose.connect(mongoUri)
-  .then(() => console.log('Connected to MongoDB for cleanup'))
-  .catch(err => {
-    console.error('Could not connect to MongoDB:', err);
-    process.exit(1);
-  });
-
 // Define a simplified version of your Subscription schema for the cleanup
 const SubscriptionSchema = new mongoose.Schema({
   userId: { type: mongoose.Schema.Types.ObjectId, required: true },
@@ -73,6 +65,10 @@ const Subscription = mongoose.model('SubscriptionCleanup', SubscriptionSchema);
 async function cleanup() {
   try {
     console.log('Starting subscription cleanup...');
+    
+    // Connect to MongoDB - we do this inside the function to ensure connection before proceeding
+    await mongoose.connect(mongoUri);
+    console.log('Connected to MongoDB for cleanup');
     
     // First, check for the problematic index
     const collection = mongoose.connection.db.collection('subscriptions');
@@ -99,16 +95,6 @@ async function cleanup() {
       // Option 1: Delete all subscriptions with null cashfreeOrderId
       const deleteResult = await Subscription.deleteMany({ cashfreeOrderId: null });
       console.log(`Deleted ${deleteResult.deletedCount} subscriptions with null cashfreeOrderId`);
-      
-      /* Option 2: Update all subscriptions with null cashfreeOrderId to have a unique value
-      let updatedCount = 0;
-      for (const sub of nullSubs) {
-        sub.cashfreeOrderId = 'migrated-' + uuidv4();
-        await sub.save();
-        updatedCount++;
-      }
-      console.log(`Updated ${updatedCount} subscriptions with unique cashfreeOrderId values`);
-      */
     }
     
     // Create a new unique index if needed
@@ -120,10 +106,21 @@ async function cleanup() {
   } catch (error) {
     console.error('Error during cleanup:', error);
   } finally {
-    await mongoose.disconnect();
-    console.log('Disconnected from MongoDB');
+    // Make sure we disconnect properly
+    if (mongoose.connection.readyState !== 0) {
+      await mongoose.disconnect();
+      console.log('Disconnected from MongoDB');
+    }
   }
 }
 
-// Run the cleanup function
-cleanup();
+// Run the cleanup function properly
+(async () => {
+  try {
+    await cleanup();
+    process.exit(0);
+  } catch (error) {
+    console.error('Unhandled error:', error);
+    process.exit(1);
+  }
+})();
