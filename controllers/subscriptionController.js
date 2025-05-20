@@ -91,4 +91,3 @@ async function getSubscriptionStatus(req, res, next) {
 }
 
 module.exports = { createSubscriptionOrder, verifyPayment, getSubscriptionStatus };
-
