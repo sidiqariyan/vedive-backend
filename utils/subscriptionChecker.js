@@ -1,5 +1,5 @@
 const User = require("../models/User");
-const Subscription = require("../models/SubscriptionPlan");
+const Subscription = require("../models/Subscription");
 
 /**
  * Checks for expired subscriptions and updates user status
