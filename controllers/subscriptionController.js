@@ -12,26 +12,32 @@ async function createSubscriptionOrder(req, res, next) {
     const { planId } = req.body;
     if (!PLANS[planId]) return res.status(400).json({ error: 'Invalid planId' });
     
-    // Generate a unique ID
+    // Generate a unique ID and ensure it's not null
     const orderId = uuidv4();
+    console.log(`Generated orderId: ${orderId}`); // Add logging
     
     const now = new Date();
     const plan = PLANS[planId];
     const expiry = plan.durationMs ? new Date(now.getTime() + plan.durationMs) : null;
     
-    // Check for existing pending subscriptions and clean them up
-    await Subscription.deleteMany({ 
+    // Clean up any existing pending subscriptions for this user
+    const deleteResult = await Subscription.deleteMany({ 
       userId: req.user._id, 
       plan: 'pending' 
     }).session(session);
+    console.log(`Deleted ${deleteResult.deletedCount} pending subscriptions`); // Add logging
     
+    // Create the new subscription
     const sub = new Subscription({
       userId:          req.user._id,
       plan:            'pending',
       startDate:       now,
       endDate:         expiry,
-      cashfreeOrderId: orderId, // This will never be null now
+      cashfreeOrderId: orderId, // This should never be null now
     });
+    
+    // Log before saving
+    console.log(`Saving subscription with cashfreeOrderId: ${sub.cashfreeOrderId}`);
     
     await sub.save({ session });
     
@@ -55,11 +61,10 @@ async function createSubscriptionOrder(req, res, next) {
   } catch (err) {
     await session.abortTransaction();
     session.endSession();
+    console.error('Error in createSubscriptionOrder:', err); // Add more detailed logging
     return next(err);
   }
 }
-
-
 
 
 async function verifyPayment(req, res, next) {
