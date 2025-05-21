@@ -1,10 +1,9 @@
 const axios = require('axios');
-// const { cashfreeAppId, cashfreeSecretKey } = require('../config/secret');
-const cashfreeAppId = "92091559e09e1ef5eb102b66b4519029";
-const cashfreeSecretKey = "cfsk_ma_prod_952ee152bb1a344252f96a977558f926_f8ec5951";
-// Define Cashfree API base URL
-// For production use: https://api.cashfree.com/pg
-// For sandbox/testing use: https://sandbox.cashfree.com/pg
+// Use environment variables for production credentials
+const cashfreeAppId = process.env.CASHFREE_APP_ID || "92091559e09e1ef5eb102b66b4519029";
+const cashfreeSecretKey = process.env.CASHFREE_SECRET_KEY || "cfsk_ma_prod_952ee152bb1a344252f96a977558f926_f8ec5951";
+
+// Define Cashfree API base URL - using production URL
 const cashfreeApiBaseUrl = 'https://api.cashfree.com/pg';
 
 /**
@@ -36,9 +35,9 @@ async function createOrder(orderData) {
       order_currency: orderData.currency || 'INR',
       customer_details: {
         customer_id: orderData.customer.id,
-        customer_name: orderData.customer.name || undefined,
-        customer_email: orderData.customer.email || undefined,
-        customer_phone: "9999999999"
+        customer_name: orderData.customer.name || '',
+        customer_email: orderData.customer.email || '',
+        customer_phone: orderData.customer.phone || "9999999999"
       }
     };
     
@@ -92,12 +91,16 @@ async function createOrder(orderData) {
       order_id: response.data.order_id,
       cf_order_id: response.data.cf_order_id,
       payment_session_id: response.data.payment_session_id,
-      payment_link: `${cashfreeApiBaseUrl}/orders/pay/${response.data.payment_session_id}`,
+      payment_link: response.data.payment_session_id 
+        ? `${cashfreeApiBaseUrl}/orders/pay/${response.data.payment_session_id}`
+        : null,
       order_status: response.data.order_status
     };
   } catch (error) {
+    console.error('Cashfree createOrder error:', error.message);
     if (error.response && error.response.data) {
       // Extract detailed error information from Cashfree response
+      console.error('Error response data:', JSON.stringify(error.response.data, null, 2));
       const errorMessage = error.response.data.message || JSON.stringify(error.response.data);
       throw new Error(errorMessage);
     }
@@ -137,7 +140,38 @@ async function getOrder(orderId) {
   }
 }
 
+/**
+ * Factory function to get the Cashfree client
+ * @returns {Object} Cashfree client with createOrder and getOrder methods
+ */
+function getCashfreeClient() {
+  return {
+    createOrder,
+    getOrder
+  };
+}
+
+/**
+ * Verify Cashfree webhook signature
+ * @param {Object} webhookBody - The webhook request body
+ * @param {string} signature - The signature from x-webhook-signature header
+ * @returns {boolean} Whether the signature is valid
+ */
+function verifyWebhookSignature(webhookBody, signature) {
+  // Implement signature verification logic based on Cashfree docs
+  // This is a placeholder - in production you should implement proper signature verification
+  try {
+    // Return true for now to allow development, but you should implement real verification
+    return true;
+  } catch (error) {
+    console.error('Webhook signature verification error:', error);
+    return false;
+  }
+}
+
 module.exports = {
   createOrder,
-  getOrder
+  getOrder,
+  getCashfreeClient,
+  verifyWebhookSignature
 };
