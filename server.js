@@ -18,6 +18,12 @@ const { checkExpiredSubscriptions } = require("./utils/subscriptionChecker");
 
 const app = express();
 
+res.cookie('cookieName', 'value', {
+  sameSite: 'none',
+  secure: true,
+  httpOnly: true,
+});
+
 // Ensure the public directory exists
 const publicDir = path.join(__dirname, "public");
 if (!fs.existsSync(publicDir)) {
