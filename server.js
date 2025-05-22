@@ -19,11 +19,11 @@ const { checkExpiredSubscriptions } = require("./utils/subscriptionChecker");
 const app = express();
 
 app.use((req, res, next) => {
-  res.cookie("cookieName", "cookieValue", {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
-  });
+  res.cookie('cookieName', 'value', {
+  sameSite: 'none',
+  secure: true,
+  httpOnly: true, // Optional: enhances security
+});
   next();
 });
 
