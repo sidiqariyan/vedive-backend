@@ -18,11 +18,15 @@ const { checkExpiredSubscriptions } = require("./utils/subscriptionChecker");
 
 const app = express();
 
-res.cookie('cookieName', 'value', {
-  sameSite: 'none',
-  secure: true,
-  httpOnly: true,
+app.use((req, res, next) => {
+  res.cookie("cookieName", "cookieValue", {
+    httpOnly: true,
+    secure: process.env.NODE_ENV === "production",
+    sameSite: "lax",
+  });
+  next();
 });
+
 
 // Ensure the public directory exists
 const publicDir = path.join(__dirname, "public");
