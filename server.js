@@ -19,10 +19,10 @@ const { checkExpiredSubscriptions } = require("./utils/subscriptionChecker");
 const app = express();
 
 app.use((req, res, next) => {
-  res.cookie('cookieName', 'value', {
-  sameSite: 'none',
-  secure: true,
-  httpOnly: true, // Optional: enhances security
+ res.cookie('sessionId', sessionToken, {
+  httpOnly: true,  // Prevents client-side JavaScript access (security best practice)
+  secure: true,    // Ensures the cookie is only sent over HTTPS
+  sameSite: 'none' // Allows the cookie in cross-site requests
 });
   next();
 });
