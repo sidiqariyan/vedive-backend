@@ -10,7 +10,7 @@ const { authenticate } = require("../middleware/authMiddleware");
 // Configure Cashfree credentials and environment
 Cashfree.XClientId = process.env.CASHFREE_APP_ID;       // Your Cashfree App ID
 Cashfree.XClientSecret = process.env.CASHFREE_SECRET_KEY; // Your Cashfree Secret Key
-Cashfree.XEnvironment = Cashfree.Environment.SANDBOX;   // Use SANDBOX for testing, PRODUCTION for live
+Cashfree.XEnvironment = 'PROD';  // Set environment as a string
 
 router.get("/plans", async (req, res) => {
   try {
