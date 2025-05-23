@@ -106,7 +106,7 @@ app.use("/api", require("./routes/scraper"));
 app.use("/api", require("./routes/gmailSender"));
 app.use("/api/posts", require("./routes/PostRoutes"));
 
-// const cashfreeRoute = require("./routes/cashfreeRoute");
+const cashfreeRoute = require("./routes/cashfreeRoute");
 // Add these to your existing imports
 const SubscriptionPlan = require("./models/SubscriptionPlan");
 const Order = require("./models/Order");
