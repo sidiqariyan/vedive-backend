@@ -9,7 +9,7 @@ const { authenticate } = require("../middleware/authMiddleware");
 
 // Cashfree configuration
 const environment = "PRODUCTION";
-const baseUrl = environment ===  "https://api.cashfree.com";
+const baseUrl = environment === "https://api.cashfree.com";
 const apiVersion = "2023-08-01"; // Cashfree API version
 
 // Route to fetch all subscription plans
