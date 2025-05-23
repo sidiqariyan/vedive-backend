@@ -1,18 +1,16 @@
 const express = require("express");
 const router = express.Router();
 const geoip = require("geoip-lite");
-const { Cashfree } = require('@cashfree/cashfree-sdk');
+const { Cashfree } = require("cashfree-pg"); // Import the correct SDK
 const { v4: uuidv4 } = require("uuid");
 const SubscriptionPlan = require("../models/SubscriptionPlan");
 const Order = require("../models/Order");
 const { authenticate } = require("../middleware/authMiddleware");
 
-// Instantiate the Cashfree client
-const cashfreeClient = new Cashfree({
-  appId: process.env.CASHFREE_APP_ID,
-  secretKey: process.env.CASHFREE_SECRET_KEY,
-  environment: "production", // Use "sandbox" for testing
-});
+// Configure Cashfree credentials and environment
+Cashfree.XClientId = process.env.CASHFREE_APP_ID;       // Your Cashfree App ID
+Cashfree.XClientSecret = process.env.CASHFREE_SECRET_KEY; // Your Cashfree Secret Key
+Cashfree.XEnvironment = Cashfree.Environment.SANDBOX;   // Use SANDBOX for testing, PRODUCTION for live
 
 router.get("/plans", async (req, res) => {
   try {
@@ -48,28 +46,39 @@ router.post("/subscribe", authenticate, async (req, res) => {
       amount = plan.prices.find((p) => p.currency === "INR").amount;
     }
 
-    const orderData = {
-      orderAmount: amount,
-      orderCurrency: currency,
-      orderId: `order_${uuidv4()}`,
-      customerName: user.name,
-      customerEmail: user.email,
-      customerPhone: user.phone || "",
-      returnUrl: "https://vedive.com/payment-callback",
-      notifyUrl: "https://vedive.com/payment-webhook",
+    const orderId = `order_${uuidv4()}`;
+    const request = {
+      order_amount: amount,
+      order_currency: currency,
+      order_id: orderId,
+      customer_details: {
+        customer_id: user._id.toString(),
+        customer_email: user.email,
+        customer_phone: user.phone || "",
+      },
+      order_meta: {
+        return_url: `https://vedive.com/payment-callback?order_id=${orderId}`,
+      },
     };
 
-    // Use the client instance to create the order
-    const order = await cashfreeClient.orders.createOrder(orderData);
-    const newOrder = new Order({
-      userId: user._id,
-      planId: plan._id,
-      orderId: order.orderId,
-      status: "pending",
-    });
-    await newOrder.save();
-
-    res.json({ paymentUrl: order.paymentLink });
+    // Create the order using Cashfree SDK
+    Cashfree.PGCreateOrder("2023-08-01", request) // Use the correct API version per Cashfree docs
+      .then((response) => {
+        const paymentUrl = response.data.payment_link;
+        const newOrder = new Order({
+          userId: user._id,
+          planId: plan._id,
+          orderId: response.data.order_id,
+          status: "pending",
+        });
+        return newOrder.save().then(() => {
+          res.json({ paymentUrl });
+        });
+      })
+      .catch((error) => {
+        console.error("Error creating order:", error.response?.data?.message || error);
+        res.status(500).json({ error: "Failed to create order" });
+      });
   } catch (error) {
     console.error("Subscribe error:", error);
     res.status(500).json({ error: "Failed to create subscription order" });
