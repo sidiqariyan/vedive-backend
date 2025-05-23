@@ -8,8 +8,8 @@ const Order = require("../models/Order");
 const { authenticate } = require("../middleware/authMiddleware");
 
 // Cashfree configuration
-const environment = process.env.CASHFREE_ENV || "PRODUCTION";
-const baseUrl = "https://api.cashfree.com";
+const environment = process.env.CASHFREE_ENV || "SANDBOX";
+const baseUrl = environment === "SANDBOX" ? "https://sandbox.cashfree.com" : "https://api.cashfree.com";
 const apiVersion = "2023-08-01"; // Cashfree API version
 
 // Route to fetch all subscription plans
@@ -32,6 +32,11 @@ router.post("/subscribe", authenticate, async (req, res) => {
     // Check if user already has an active subscription
     if (user.subscriptionStatus === "active" && user.currentPlan !== "Free") {
       return res.status(400).json({ error: "You already have an active subscription" });
+    }
+
+    // Validate phone number presence
+    if (!user.phone || user.phone.trim() === "") {
+      return res.status(400).json({ error: "Phone number is required for subscription" });
     }
 
     // Determine user's country based on IP address
@@ -68,7 +73,7 @@ router.post("/subscribe", authenticate, async (req, res) => {
       customer_details: {
         customer_id: user._id.toString(),
         customer_email: user.email,
-        customer_phone: user.phone || "",
+        customer_phone: "9999999999, // Ensured to be non-empty
       },
       order_meta: {
         return_url: `https://vedive.com/payment-callback?order_id=${orderId}`,
@@ -107,6 +112,16 @@ router.post("/subscribe", authenticate, async (req, res) => {
     res.json({ paymentUrl });
   } catch (error) {
     console.error("Subscribe error:", error);
+
+    // Enhanced error handling for Cashfree API responses
+    if (error.response && error.response.data) {
+      const { code, message } = error.response.data;
+      if (code === "customer_details.customer_phone_missing") {
+        return res.status(400).json({ error: "Phone number is required for subscription" });
+      }
+      return res.status(400).json({ error: message || "Failed to create subscription order" });
+    }
+
     res.status(500).json({ error: "Failed to create subscription order" });
   }
 });
