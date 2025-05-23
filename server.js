@@ -106,11 +106,16 @@ app.use("/api", require("./routes/scraper"));
 app.use("/api", require("./routes/gmailSender"));
 app.use("/api/posts", require("./routes/PostRoutes"));
 
-const cashfreeRoute = require("./routes/cashfreeRoute");
-const subscriptionRoute = require("./routes/subscriptionRoute");
+// const cashfreeRoute = require("./routes/cashfreeRoute");
+// Add these to your existing imports
+const SubscriptionPlan = require("./models/SubscriptionPlan");
+const Order = require("./models/Order");
+
+// Update your existing app.use statements if needed
+app.use("/api/subscription", require("./routes/subscriptionRoute"));
+app.use("/api/payment", require("./routes/cashfreeRoute"));
 app.use("/api/blog", require("./routes/blogRoute"));
 app.use("/api/payment", cashfreeRoute);
-app.use("/api/subscription", subscriptionRoute);
 const { handleEmailScraper } = require("./routes/scraper");
 // Updated Email Scraper Endpoint
 app.use("/", require("./routes/campaignRoutes"));
