@@ -1,7 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const geoip = require("geoip-lite");
-const Cashfree = require("cashfree-sdk"); // Note: Capitalized for clarity, assuming it's a constructor
+const { Cashfree } = require('@cashfree/cashfree-sdk');
 const { v4: uuidv4 } = require("uuid");
 const SubscriptionPlan = require("../models/SubscriptionPlan");
 const Order = require("../models/Order");
