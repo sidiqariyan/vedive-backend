@@ -8,8 +8,8 @@ const Order = require("../models/Order");
 const { authenticate } = require("../middleware/authMiddleware");
 
 // Cashfree configuration
-const environment = process.env.CASHFREE_ENV || "SANDBOX";
-const baseUrl = environment === "SANDBOX" ? "https://sandbox.cashfree.com" : "https://api.cashfree.com";
+const environment = "PRODUCTION";
+const baseUrl = environment ===  "https://api.cashfree.com";
 const apiVersion = "2023-08-01"; // Cashfree API version
 
 // Route to fetch all subscription plans
