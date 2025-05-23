@@ -1,18 +1,17 @@
 const express = require("express");
 const router = express.Router();
 const geoip = require("geoip-lite");
-const cashfree = require("cashfree-sdk");
+const Cashfree = require("cashfree-sdk"); // Note: Capitalized for clarity, assuming it's a constructor
 const { v4: uuidv4 } = require("uuid");
 const SubscriptionPlan = require("../models/SubscriptionPlan");
 const Order = require("../models/Order");
 const { authenticate } = require("../middleware/authMiddleware");
 
-// Cashfree configuration
-cashfree.config.setup({
-  apiVersion: "2022-01-01",
+// Instantiate the Cashfree client
+const cashfreeClient = new Cashfree({
   appId: process.env.CASHFREE_APP_ID,
   secretKey: process.env.CASHFREE_SECRET_KEY,
-  environment: "production",
+  environment: "production", // Use "sandbox" for testing
 });
 
 router.get("/plans", async (req, res) => {
@@ -60,7 +59,8 @@ router.post("/subscribe", authenticate, async (req, res) => {
       notifyUrl: "https://vedive.com/payment-webhook",
     };
 
-    const order = await cashfree.orders.createOrder(orderData);
+    // Use the client instance to create the order
+    const order = await cashfreeClient.orders.createOrder(orderData);
     const newOrder = new Order({
       userId: user._id,
       planId: plan._id,
