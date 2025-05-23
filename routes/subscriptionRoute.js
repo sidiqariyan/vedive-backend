@@ -1,24 +1,79 @@
-const express = require('express');
+const express = require("express");
 const router = express.Router();
-const { 
-  createSubscriptionOrder, 
-  verifyPayment, 
-  getSubscriptionStatus,
-  webhookHandler
-} = require('../controllers/subscriptionController');
-const { authenticate } = require('../middleware/authMiddleware');
+const geoip = require("geoip-lite");
+const cashfree = require("cashfree-sdk");
+const { v4: uuidv4 } = require("uuid");
+const SubscriptionPlan = require("../models/SubscriptionPlan");
+const Order = require("../models/Order");
+const { authenticate } = require("../middleware/authMiddleware");
 
-// Create a new subscription order
-router.post('/create', authenticate, createSubscriptionOrder);
+// Cashfree configuration
+cashfree.config.setup({
+  apiVersion: "2022-01-01",
+  appId: process.env.CASHFREE_APP_ID,
+  secretKey: process.env.CASHFREE_SECRET_KEY,
+  environment: "production",
+});
 
-// Verify payment status for a specific order
-router.get('/verify/:orderid', authenticate, verifyPayment);
+router.get("/plans", async (req, res) => {
+  try {
+    const plans = await SubscriptionPlan.find({});
+    res.json(plans);
+  } catch (error) {
+    res.status(500).json({ error: "Failed to fetch plans" });
+  }
+});
 
-// Get current subscription status
-router.get('/status', authenticate, getSubscriptionStatus);
+router.post("/subscribe", authenticate, async (req, res) => {
+  try {
+    const { planId } = req.body;
+    const user = req.user;
 
-// Webhook endpoint for Cashfree callbacks
-// Note: Webhook doesn't need auth middleware
-router.post('/webhook', webhookHandler);
+    if (user.subscriptionStatus === "active" && user.currentPlan !== "Free") {
+      return res.status(400).json({ error: "You already have an active subscription" });
+    }
+
+    const ip = req.headers["x-forwarded-for"] || req.connection.remoteAddress;
+    const geo = geoip.lookup(ip);
+    const country = geo ? geo.country : "US";
+
+    const plan = await SubscriptionPlan.findById(planId);
+    if (!plan) {
+      return res.status(404).json({ error: "Plan not found" });
+    }
+
+    let currency = "USD";
+    let amount = plan.prices.find((p) => p.currency === "USD").amount;
+    if (country === "IN") {
+      currency = "INR";
+      amount = plan.prices.find((p) => p.currency === "INR").amount;
+    }
+
+    const orderData = {
+      orderAmount: amount,
+      orderCurrency: currency,
+      orderId: `order_${uuidv4()}`,
+      customerName: user.name,
+      customerEmail: user.email,
+      customerPhone: user.phone || "",
+      returnUrl: "https://vedive.com/payment-callback",
+      notifyUrl: "https://vedive.com/payment-webhook",
+    };
+
+    const order = await cashfree.orders.createOrder(orderData);
+    const newOrder = new Order({
+      userId: user._id,
+      planId: plan._id,
+      orderId: order.orderId,
+      status: "pending",
+    });
+    await newOrder.save();
+
+    res.json({ paymentUrl: order.paymentLink });
+  } catch (error) {
+    console.error("Subscribe error:", error);
+    res.status(500).json({ error: "Failed to create subscription order" });
+  }
+});
 
 module.exports = router;
