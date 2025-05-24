@@ -9,7 +9,7 @@ const { authenticate } = require("../middleware/authMiddleware");
 
 // Cashfree configuration
 const environment = process.env.CASHFREE_ENV || "PRODUCTION";
-const baseUrl = environment === "SANDBOX" ? "https://sandbox.cashfree.com" "https://api.cashfree.com";
+const baseUrl = environment === "SANDBOX" ? "https://sandbox.cashfree.com":"https://api.cashfree.com";
 const apiVersion = "2023-08-01"; // Cashfree API version
 
 // Phone number validation regex (e.g., + followed by 10-15 digits)
