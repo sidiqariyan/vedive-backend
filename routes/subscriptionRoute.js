@@ -9,7 +9,7 @@ const { authenticate } = require("../middleware/authMiddleware");
 
 // Cashfree configuration
 const environment = process.env.CASHFREE_ENV || "SANDBOX";
-const baseUrl = environment === "https://api.cashfree.com";
+const baseUrl = "https://api.cashfree.com";
 const checkoutBaseUrl =  "https://www.cashfree.com";
 const apiVersion = "2023-08-01"; // Cashfree API version
 
@@ -108,7 +108,7 @@ router.post("/subscribe", authenticate, async (req, res) => {
 
     // Construct paymentUrl using payment_session_id
     const paymentSessionId = response.data.payment_session_id;
-    const paymentUrl = `${checkoutBaseUrl}/pg/checkout?session_id=${paymentSessionId}`;
+    const paymentUrl = `${checkoutBaseUrl}/checkout?session_id=${paymentSessionId}`;
 
     // Save order details in the database
     const newOrder = new Order({
