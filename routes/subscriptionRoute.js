@@ -23,10 +23,10 @@ const checkoutBaseUrl = isProd
 
 // Resolve credentials
 const clientId = isProd
-  ? process.env.CASHFREE_APP_ID
+  ? "92091559e09e1ef5eb102b66b4519029"
   : process.env.CASHFREE_SANDBOX_APP_ID;
 const clientSecret = isProd
-  ? process.env.CASHFREE_SECRET_KEY
+  ? "cfsk_ma_prod_952ee152bb1a344252f96a977558f926_f8ec5951"
   : process.env.CASHFREE_SANDBOX_SECRET_KEY;
 
 // Fail fast if creds are missing
