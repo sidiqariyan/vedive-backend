@@ -8,9 +8,12 @@ const Order = require("../models/Order");
 const { authenticate } = require("../middleware/authMiddleware");
 
 // Cashfree configuration
-const environment = "PRODUCTION";
-const baseUrl = environment === "https://api.cashfree.com";
+const environment = process.env.CASHFREE_ENV || "SANDBOX";
+const baseUrl = environment === "SANDBOX" ? "https://sandbox.cashfree.com" : "https://api.cashfree.com";
 const apiVersion = "2023-08-01"; // Cashfree API version
+
+// Phone number validation regex (e.g., + followed by 10-15 digits)
+const phoneRegex = /^\+\d{10,15}$/;
 
 // Route to fetch all subscription plans
 router.get("/plans", async (req, res) => {
@@ -26,17 +29,32 @@ router.get("/plans", async (req, res) => {
 // Route to create a subscription order
 router.post("/subscribe", authenticate, async (req, res) => {
   try {
-    const { planId } = req.body;
+    const { planId, phone } = req.body;
     const user = req.user;
+
+    // Log for debugging
+    console.log("Request body phone:", phone);
+    console.log("User phone:", user.phone);
 
     // Check if user already has an active subscription
     if (user.subscriptionStatus === "active" && user.currentPlan !== "Free") {
       return res.status(400).json({ error: "You already have an active subscription" });
     }
 
-    // Validate phone number presence
-    if (!user.phone || user.phone.trim() === "") {
-      return res.status(400).json({ error: "Phone number is required for subscription" });
+    // Handle phone number: use provided phone or fall back to user.phone
+    if (phone) {
+      if (!phoneRegex.test(phone)) {
+        return res.status(400).json({
+          error: "Invalid phone number format. It should start with '+' followed by 10 to 15 digits (e.g., +919876543210).",
+        });
+      }
+      // Update user's phone number in the database
+      user.phone = phone;
+      await user.save();
+    } else if (!user.phone || !phoneRegex.test(user.phone)) {
+      return res.status(400).json({
+        error: "A valid phone number is required for subscription. Please provide it in the request or ensure it’s set in your profile.",
+      });
     }
 
     // Determine user's country based on IP address
@@ -58,7 +76,7 @@ router.post("/subscribe", authenticate, async (req, res) => {
       amount = plan.prices.find((p) => p.currency === "INR")?.amount;
     }
 
-    if (!amount) {
+    if (amount === undefined) {
       return res.status(400).json({ error: "Price not found for the selected currency" });
     }
 
@@ -73,7 +91,7 @@ router.post("/subscribe", authenticate, async (req, res) => {
       customer_details: {
         customer_id: user._id.toString(),
         customer_email: user.email,
-        customer_phone: "918920593970",
+        customer_phone: user.phone, // Use validated user.phone
       },
       order_meta: {
         return_url: `https://vedive.com/payment-callback?order_id=${orderId}`,
@@ -115,13 +133,13 @@ router.post("/subscribe", authenticate, async (req, res) => {
 
     // Enhanced error handling for Cashfree API responses
     if (error.response && error.response.data) {
+      console.error("Cashfree API error:", error.response.data);
       const { code, message } = error.response.data;
       if (code === "customer_details.customer_phone_missing") {
         return res.status(400).json({ error: "Phone number is required for subscription" });
       }
       return res.status(400).json({ error: message || "Failed to create subscription order" });
     }
-
     res.status(500).json({ error: "Failed to create subscription order" });
   }
 });
