@@ -108,7 +108,7 @@ router.post("/subscribe", authenticate, async (req, res) => {
 
     // Construct paymentUrl using payment_session_id
     const paymentSessionId = response.data.payment_session_id;
-    const paymentUrl = `${checkoutBaseUrl}/checkout?session_id=${paymentSessionId}`;
+    const paymentUrl = `${checkoutBaseUrl}/pg/checkout?session_id=${paymentSessionId}`;
 
     // Save order details in the database
     const newOrder = new Order({
