@@ -30,6 +30,7 @@ router.get("/plans", async (req, res) => {
 router.post("/subscribe", authenticate, async (req, res) => {
   try {
     const { planId } = req.body;
+    const phone = "+918920593970"
     const user = req.user;
 
     // Check if user already has an active subscription
