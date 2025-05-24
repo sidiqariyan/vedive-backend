@@ -8,8 +8,8 @@ const Order = require("../models/Order");
 const { authenticate } = require("../middleware/authMiddleware");
 
 // Cashfree configuration
-const environment = process.env.CASHFREE_ENV || "SANDBOX";
-const baseUrl = environment === "SANDBOX" ? "https://sandbox.cashfree.com" : "https://api.cashfree.com";
+const environment = process.env.CASHFREE_ENV || "PRODUCTION";
+const baseUrl = environment === "SANDBOX" ? "https://sandbox.cashfree.com" "https://api.cashfree.com";
 const apiVersion = "2023-08-01"; // Cashfree API version
 
 // Phone number validation regex (e.g., + followed by 10-15 digits)
@@ -91,7 +91,7 @@ router.post("/subscribe", authenticate, async (req, res) => {
       customer_details: {
         customer_id: user._id.toString(),
         customer_email: user.email,
-        customer_phone: user.phone, // Use validated user.phone
+        customer_phone: "+918920593970, // Use validated user.phone
       },
       order_meta: {
         return_url: `https://vedive.com/payment-callback?order_id=${orderId}`,
