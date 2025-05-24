@@ -29,12 +29,8 @@ router.get("/plans", async (req, res) => {
 // Route to create a subscription order
 router.post("/subscribe", authenticate, async (req, res) => {
   try {
-    const { planId, phone } = req.body;
+    const { planId } = req.body;
     const user = req.user;
-
-    // Log for debugging
-    console.log("Request body phone:", phone);
-    console.log("User phone:", user.phone);
 
     // Check if user already has an active subscription
     if (user.subscriptionStatus === "active" && user.currentPlan !== "Free") {
