@@ -1,4 +1,5 @@
-// routes/subscriptionRoute.js
+require("dotenv").config();        // ← load from .env in development
+
 const express = require("express");
 const router = express.Router();
 const axios = require("axios");
@@ -8,11 +9,11 @@ const SubscriptionPlan = require("../models/SubscriptionPlan");
 const Order = require("../models/Order");
 const { authenticate } = require("../middleware/authMiddleware");
 
-// Determine environment: SANDBOX or PRODUCTION
+// Determine environment
 const environment = (process.env.CASHFREE_ENV || "SANDBOX").toUpperCase();
 const isProd = environment === "PRODUCTION";
 
-// Base URLs for API and checkout
+// Resolve endpoints
 const baseUrl = isProd
   ? "https://api.cashfree.com"
   : "https://sandbox.cashfree.com";
@@ -20,7 +21,7 @@ const checkoutBaseUrl = isProd
   ? "https://www.cashfree.com"
   : "https://sandbox.cashfree.com";
 
-// Pick credentials based on environment
+// Resolve credentials
 const clientId = isProd
   ? process.env.CASHFREE_APP_ID
   : process.env.CASHFREE_SANDBOX_APP_ID;
@@ -28,8 +29,19 @@ const clientSecret = isProd
   ? process.env.CASHFREE_SECRET_KEY
   : process.env.CASHFREE_SANDBOX_SECRET_KEY;
 
-// API version (verify this in the docs if you upgrade)
+// Fail fast if creds are missing
+if (!clientId || !clientSecret) {
+  console.error(`
+    🚨 Missing Cashfree credentials! 🚨
+    environment: ${environment}
+    clientId: ${clientId ? "(set)" : "(undefined)"}
+    clientSecret: ${clientSecret ? "(set)" : "(undefined)"}
+  `);
+  process.exit(1);
+}
+
 const apiVersion = "2023-08-01";
+
 
 // GET /plans — list all subscription plans
 router.get("/plans", async (req, res) => {
