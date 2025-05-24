@@ -91,7 +91,7 @@ router.post("/subscribe", authenticate, async (req, res) => {
       customer_details: {
         customer_id: user._id.toString(),
         customer_email: user.email,
-        customer_phone: "+918920593970, // Use validated user.phone
+        customer_phone: "+918920593970", // Use validated user.phone
       },
       order_meta: {
         return_url: `https://vedive.com/payment-callback?order_id=${orderId}`,
