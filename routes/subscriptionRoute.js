@@ -9,9 +9,15 @@ const { authenticate } = require("../middleware/authMiddleware");
 
 // Cashfree configuration
 const environment = process.env.CASHFREE_ENV || "SANDBOX";
-const baseUrl = "https://api.cashfree.com";
-const checkoutBaseUrl =  "https://www.cashfree.com";
-const apiVersion = "2023-08-01"; // Cashfree API version
+const baseUrl =
+  environment === "PRODUCTION"
+    ? "https://api.cashfree.com"
+    : "https://sandbox.cashfree.com";
+const checkoutBaseUrl =
+  environment === "PRODUCTION"
+    ? "https://www.cashfree.com"
+    : "https://sandbox.cashfree.com";
+const apiVersion = "2023-08-01"; // Ensure this matches the version you're using
 
 // Route to fetch all subscription plans
 router.get("/plans", async (req, res) => {
@@ -34,12 +40,16 @@ router.post("/subscribe", authenticate, async (req, res) => {
 
     // Check if user already has an active subscription
     if (user.subscriptionStatus === "active" && user.currentPlan !== "Free") {
-      return res.status(400).json({ error: "You already have an active subscription" });
+      return res
+        .status(400)
+        .json({ error: "You already have an active subscription" });
     }
 
     // Validate phone number
     if (!phone || !phone.startsWith("+")) {
-      return res.status(400).json({ error: "Valid phone number with country code is required" });
+      return res
+        .status(400)
+        .json({ error: "Valid phone number with country code is required" });
     }
 
     // Determine user's country based on IP address
@@ -62,7 +72,9 @@ router.post("/subscribe", authenticate, async (req, res) => {
     }
 
     if (!amount) {
-      return res.status(400).json({ error: "Price not found for the selected currency" });
+      return res
+        .status(400)
+        .json({ error: "Price not found for the selected currency" });
     }
 
     // Generate a unique order ID
@@ -127,6 +139,10 @@ router.post("/subscribe", authenticate, async (req, res) => {
     console.error("Subscribe error:", error);
     if (error.response) {
       console.error("Cashfree API error:", error.response.data);
+      return res.status(500).json({
+        error: "Failed to create subscription order",
+        details: error.response.data,
+      });
     }
     res.status(500).json({ error: "Failed to create subscription order" });
   }
