@@ -10,7 +10,7 @@ const Order = require("../models/Order");
 const { authenticate } = require("../middleware/authMiddleware");
 
 // Determine environment
-const environment = (process.env.CASHFREE_ENV || "SANDBOX").toUpperCase();
+const environment = (process.env.CASHFREE_ENV || "PRODUCTION").toUpperCase();
 const isProd = environment === "PRODUCTION";
 
 // Resolve endpoints
