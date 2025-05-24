@@ -8,8 +8,9 @@ const Order = require("../models/Order");
 const { authenticate } = require("../middleware/authMiddleware");
 
 // Cashfree configuration
-const environment = process.env.CASHFREE_ENV || "pr";
-const baseUrl = "https://api.cashfree.com";
+const environment = process.env.CASHFREE_ENV || "SANDBOX";
+const baseUrl = environment === "https://api.cashfree.com";
+const checkoutBaseUrl =  "https://www.cashfree.com";
 const apiVersion = "2023-08-01"; // Cashfree API version
 
 // Route to fetch all subscription plans
@@ -75,7 +76,7 @@ router.post("/subscribe", authenticate, async (req, res) => {
       customer_details: {
         customer_id: user._id.toString(),
         customer_email: user.email,
-        customer_phone: phone, // Use phone from request
+        customer_phone: phone,
       },
       order_meta: {
         return_url: `https://vedive.com/payment-callback?order_id=${orderId}`,
@@ -105,7 +106,9 @@ router.post("/subscribe", authenticate, async (req, res) => {
       throw new Error("Failed to create order");
     }
 
-    const paymentUrl = response.data.payment_link;
+    // Construct paymentUrl using payment_session_id
+    const paymentSessionId = response.data.payment_session_id;
+    const paymentUrl = `${checkoutBaseUrl}/pg/checkout?session_id=${paymentSessionId}`;
 
     // Save order details in the database
     const newOrder = new Order({
