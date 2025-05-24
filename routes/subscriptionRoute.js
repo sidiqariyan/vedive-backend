@@ -1,3 +1,4 @@
+// routes/subscriptionRoute.js
 const express = require("express");
 const router = express.Router();
 const axios = require("axios");
@@ -7,80 +8,77 @@ const SubscriptionPlan = require("../models/SubscriptionPlan");
 const Order = require("../models/Order");
 const { authenticate } = require("../middleware/authMiddleware");
 
-// Cashfree configuration
-const environment = process.env.CASHFREE_ENV || "SANDBOX";
-const baseUrl =
-  environment === "PRODUCTION"
-    ? "https://api.cashfree.com"
-    : "https://sandbox.cashfree.com";
-const checkoutBaseUrl =
-  environment === "PRODUCTION"
-    ? "https://www.cashfree.com"
-    : "https://sandbox.cashfree.com";
-const apiVersion = "2023-08-01"; // Ensure this matches the version you're using
+// Determine environment: SANDBOX or PRODUCTION
+const environment = (process.env.CASHFREE_ENV || "SANDBOX").toUpperCase();
+const isProd = environment === "PRODUCTION";
 
-// Route to fetch all subscription plans
+// Base URLs for API and checkout
+const baseUrl = isProd
+  ? "https://api.cashfree.com"
+  : "https://sandbox.cashfree.com";
+const checkoutBaseUrl = isProd
+  ? "https://www.cashfree.com"
+  : "https://sandbox.cashfree.com";
+
+// Pick credentials based on environment
+const clientId = isProd
+  ? process.env.CASHFREE_APP_ID
+  : process.env.CASHFREE_SANDBOX_APP_ID;
+const clientSecret = isProd
+  ? process.env.CASHFREE_SECRET_KEY
+  : process.env.CASHFREE_SANDBOX_SECRET_KEY;
+
+// API version (verify this in the docs if you upgrade)
+const apiVersion = "2023-08-01";
+
+// GET /plans — list all subscription plans
 router.get("/plans", async (req, res) => {
   try {
     const plans = await SubscriptionPlan.find({});
     res.json(plans);
-  } catch (error) {
-    console.error("Error fetching plans:", error);
+  } catch (err) {
+    console.error("Error fetching plans:", err);
     res.status(500).json({ error: "Failed to fetch plans" });
   }
 });
 
-// Route to create a subscription order
+// POST /subscribe — create a Cashfree order
 router.post("/subscribe", authenticate, async (req, res) => {
   try {
     const { planId, phone } = req.body;
     const user = req.user;
 
-    console.log("Received subscription request:", { planId, phone });
-
-    // Check if user already has an active subscription
+    // Prevent duplicate active subscriptions
     if (user.subscriptionStatus === "active" && user.currentPlan !== "Free") {
-      return res
-        .status(400)
-        .json({ error: "You already have an active subscription" });
+      return res.status(400).json({ error: "You already have an active subscription" });
     }
 
-    // Validate phone number
+    // Phone validation
     if (!phone || !phone.startsWith("+")) {
-      return res
-        .status(400)
-        .json({ error: "Valid phone number with country code is required" });
+      return res.status(400).json({ error: "Valid phone number with country code is required" });
     }
 
-    // Determine user's country based on IP address
+    // Geo-locate country from IP (fallback to US)
     const ip = req.headers["x-forwarded-for"] || req.connection.remoteAddress;
     const geo = geoip.lookup(ip);
-    const country = geo ? geo.country : "US"; // Default to US if country not determined
+    const country = geo?.country === "IN" ? "IN" : "US";
 
-    // Fetch the subscription plan
+    // Fetch plan & determine amount/currency
     const plan = await SubscriptionPlan.findById(planId);
     if (!plan) {
       return res.status(404).json({ error: "Plan not found" });
     }
 
-    // Determine currency and amount based on user's country
-    let currency = "USD";
-    let amount = plan.prices.find((p) => p.currency === "USD")?.amount;
-    if (country === "IN") {
-      currency = "INR";
-      amount = plan.prices.find((p) => p.currency === "INR")?.amount;
+    const priceObj = plan.prices.find(p => p.currency === (country === "IN" ? "INR" : "USD"));
+    if (!priceObj) {
+      return res.status(400).json({ error: "Price not found for the selected currency" });
     }
+    const { amount, currency } = priceObj;
 
-    if (!amount) {
-      return res
-        .status(400)
-        .json({ error: "Price not found for the selected currency" });
-    }
-
-    // Generate a unique order ID
+    // Build unique order ID
     const orderId = `order_${uuidv4()}`;
 
-    // Prepare order data for Cashfree API
+    // Cashfree order payload
     const orderData = {
       order_id: orderId,
       order_amount: amount,
@@ -96,52 +94,42 @@ router.post("/subscribe", authenticate, async (req, res) => {
       },
     };
 
-    console.log("Creating order with data:", orderData);
-
-    // Cashfree API endpoint and headers
-    const url = `${baseUrl}/pg/orders`;
+    // Request headers
     const headers = {
       "x-api-version": apiVersion,
       "Content-Type": "application/json",
-      "x-client-id": process.env.CASHFREE_APP_ID,
-      "x-client-secret": process.env.CASHFREE_SECRET_KEY,
+      "x-client-id": clientId,
+      "x-client-secret": clientSecret,
     };
 
-    console.log("Sending request to Cashfree:", url);
+    // Create order
+    const cfRes = await axios.post(`${baseUrl}/pg/orders`, orderData, { headers });
 
-    // Create order with Cashfree
-    const response = await axios.post(url, orderData, { headers });
-
-    console.log("Received response from Cashfree:", response.data);
-
-    if (response.status !== 200) {
+    // Check success
+    if (cfRes.status !== 200 || !cfRes.data.payment_session_id) {
+      console.error("Unexpected Cashfree response:", cfRes.data);
       throw new Error("Failed to create order");
     }
 
-    // Construct paymentUrl using payment_session_id
-    const paymentSessionId = response.data.payment_session_id;
-    const paymentUrl = `${checkoutBaseUrl}/pg/checkout?session_id=${paymentSessionId}`;
-
-    // Save order details in the database
-    const newOrder = new Order({
+    // Save order in our DB
+    await Order.create({
       userId: user._id,
       planId: plan._id,
-      orderId: response.data.order_id,
+      orderId: cfRes.data.order_id,
       status: "pending",
     });
-    await newOrder.save();
 
-    console.log("Order created successfully, paymentUrl:", paymentUrl);
-
-    // Return the payment URL to the client
+    // Return the hosted checkout URL
+    const paymentUrl = `${checkoutBaseUrl}/pg/checkout?session_id=${cfRes.data.payment_session_id}`;
     res.json({ paymentUrl });
-  } catch (error) {
-    console.error("Subscribe error:", error);
-    if (error.response) {
-      console.error("Cashfree API error:", error.response.data);
+
+  } catch (err) {
+    console.error("Subscribe error:", err);
+    // If Cashfree returned an error payload, include it
+    if (err.response?.data) {
       return res.status(500).json({
         error: "Failed to create subscription order",
-        details: error.response.data,
+        details: err.response.data,
       });
     }
     res.status(500).json({ error: "Failed to create subscription order" });
