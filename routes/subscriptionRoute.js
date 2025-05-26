@@ -1,5 +1,4 @@
-require("dotenv").config();        // ← load from .env in development
-
+require("dotenv").config();
 const express = require("express");
 const router = express.Router();
 const axios = require("axios");
@@ -9,11 +8,11 @@ const SubscriptionPlan = require("../models/SubscriptionPlan");
 const Order = require("../models/Order");
 const { authenticate } = require("../middleware/authMiddleware");
 
-// Determine environment
+// Determine environment (sandbox or production)
 const environment = (process.env.CASHFREE_ENV || "PRODUCTION").toUpperCase();
 const isProd = environment === "PRODUCTION";
 
-// Resolve endpoints
+// Resolve Cashfree endpoints
 const baseUrl = isProd
   ? "https://api.cashfree.com"
   : "https://sandbox.cashfree.com";
@@ -21,15 +20,15 @@ const checkoutBaseUrl = isProd
   ? "https://www.cashfree.com"
   : "https://sandbox.cashfree.com";
 
-// Resolve credentials
+// Resolve Cashfree credentials
 const clientId = isProd
-  ? "92091559e09e1ef5eb102b66b4519029"
+  ? "92091559e09e1ef5eb102b66b4519029" // Replace with your production client ID
   : process.env.CASHFREE_SANDBOX_APP_ID;
 const clientSecret = isProd
-  ? "cfsk_ma_prod_952ee152bb1a344252f96a977558f926_f8ec5951"
+  ? "cfsk_ma_prod_952ee152bb1a344252f96a977558f926_f8ec5951" // Replace with your production secret key
   : process.env.CASHFREE_SANDBOX_SECRET_KEY;
 
-// Fail fast if creds are missing
+// Fail fast if credentials are missing
 if (!clientId || !clientSecret) {
   console.error(`
     🚨 Missing Cashfree credentials! 🚨
@@ -42,8 +41,7 @@ if (!clientId || !clientSecret) {
 
 const apiVersion = "2023-08-01";
 
-
-// GET /plans — list all subscription plans
+// GET /plans - List all subscription plans
 router.get("/plans", async (req, res) => {
   try {
     const plans = await SubscriptionPlan.find({});
@@ -54,20 +52,23 @@ router.get("/plans", async (req, res) => {
   }
 });
 
-// POST /subscribe — create a Cashfree order
-// POST /subscribe — create a Cashfree order
+// POST /subscribe - Create a Cashfree order for subscription
 router.post("/subscribe", authenticate, async (req, res) => {
   try {
     const { planId, phone } = req.body;
     const user = req.user;
 
-    // Prevent duplicate subscriptions
+    console.log("Subscription request:", { planId, phone, userId: user._id });
+
+    // Check for active subscription
     if (user.subscriptionStatus === "active" && user.currentPlan !== "Free") {
+      console.log("Blocked: User has active subscription");
       return res.status(400).json({ error: "You already have an active subscription" });
     }
 
     // Validate phone number
     if (!phone || !phone.startsWith("+")) {
+      console.log("Blocked: Invalid phone number:", phone);
       return res.status(400).json({ error: "Valid phone number with country code is required" });
     }
 
@@ -75,15 +76,19 @@ router.post("/subscribe", authenticate, async (req, res) => {
     const ip = req.headers["x-forwarded-for"] || req.connection.remoteAddress;
     const geo = geoip.lookup(ip);
     const country = geo?.country === "IN" ? "IN" : "US";
+    console.log("User country:", country);
 
     // Fetch subscription plan
     const plan = await SubscriptionPlan.findById(planId);
     if (!plan) {
+      console.log("Blocked: Plan not found:", planId);
       return res.status(404).json({ error: "Plan not found" });
     }
 
+    // Check price availability for the user's currency
     const priceObj = plan.prices.find(p => p.currency === (country === "IN" ? "INR" : "USD"));
     if (!priceObj) {
+      console.log("Blocked: No price for currency:", country === "IN" ? "INR" : "USD");
       return res.status(400).json({ error: "Price not found for the selected currency" });
     }
     const { amount, currency } = priceObj;
@@ -102,19 +107,14 @@ router.post("/subscribe", authenticate, async (req, res) => {
         customer_phone: phone,
       },
       order_meta: {
-        return_url: `https://vedive.com/payment-callback?order_id=${orderId}`,
-        notify_url: "https://vedive.com/payment-webhook",
+        return_url: `https://yourdomain.com/payment-callback?order_id=${orderId}`, // Replace with your domain
+        notify_url: "https://yourdomain.com/payment-webhook", // Replace with your domain
       },
     };
 
     // Cashfree API configuration
-    const isProd = process.env.CASHFREE_ENV?.toUpperCase() === "PRODUCTION";
-    const baseUrl = isProd ? "https://api.cashfree.com" : "https://sandbox.cashfree.com";
-    const clientId = isProd ? "92091559e09e1ef5eb102b66b4519029" : process.env.CASHFREE_SANDBOX_APP_ID;
-    const clientSecret = isProd ? "cfsk_ma_prod_952ee152bb1a344252f96a977558f926_f8ec5951" : process.env.CASHFREE_SANDBOX_SECRET_KEY;
-
     const headers = {
-      "x-api-version": "2023-08-01",
+      "x-api-version": apiVersion,
       "Content-Type": "application/json",
       "x-client-id": clientId,
       "x-client-secret": clientSecret,
