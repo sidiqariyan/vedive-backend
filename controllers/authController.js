@@ -51,20 +51,64 @@ exports.register = async (req, res) => {
     // Save the user to the database
     await user.save();
 
-    // Generate verification token with a 5-minute expiry
-    const verificationToken = generateToken({ _id: user._id }, "5m");
+    // Generate verification token with a 15-minute expiry
+    const verificationToken = generateToken({ _id: user._id }, "15m");
     user.verificationToken = verificationToken;
+    user.verificationTokenExpires = Date.now() + 900000; // 15 minutes
     await user.save();
 
     // Build the verification URL using the FRONTEND_URL environment variable
     const verificationUrl = `${process.env.FRONTEND_URL}/verify-email?token=${verificationToken}`;
-    await sendVerificationEmail(email, verificationUrl);
+    await sendVerificationEmail(email, verificationUrl, name);
 
     // Respond with success message
-    res.status(201).json({ message: "User registered successfully. Please verify your email." });
+    res.status(201).json({ 
+      message: "User registered successfully. Please check your email to verify your account.",
+      email: email 
+    });
   } catch (error) {
     console.error("Registration Error:", error);
     res.status(500).json({ error: error.message || "Registration failed" });
+  }
+};
+
+/**
+ * Resend Verification Email
+ * @route POST /api/auth/resend-verification
+ */
+exports.resendVerification = async (req, res) => {
+  try {
+    const { email } = req.body;
+
+    if (!email) {
+      return res.status(400).json({ error: "Email is required" });
+    }
+
+    // Find user by email
+    const user = await User.findOne({ email });
+    if (!user) {
+      return res.status(400).json({ error: "User not found" });
+    }
+
+    // Check if user is already verified
+    if (user.isVerified) {
+      return res.status(400).json({ error: "Email is already verified" });
+    }
+
+    // Generate new verification token with 15-minute expiry
+    const verificationToken = generateToken({ _id: user._id }, "15m");
+    user.verificationToken = verificationToken;
+    user.verificationTokenExpires = Date.now() + 900000; // 15 minutes
+    await user.save();
+
+    // Build the verification URL
+    const verificationUrl = `${process.env.FRONTEND_URL}/verify-email?token=${verificationToken}`;
+    await sendVerificationEmail(email, verificationUrl, user.name);
+
+    res.status(200).json({ message: "Verification email sent successfully" });
+  } catch (error) {
+    console.error("Resend Verification Error:", error);
+    res.status(500).json({ error: "Failed to resend verification email" });
   }
 };
 
@@ -76,20 +120,50 @@ exports.verifyEmail = async (req, res) => {
   try {
     const { token } = req.query;
 
-    // Find user by verification token
-    const user = await User.findOne({ verificationToken: token });
-    if (!user) {
+    if (!token) {
+      return res.status(400).json({ error: "Token is required" });
+    }
+
+    // Verify JWT token first
+    let decoded;
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET);
+    } catch (jwtError) {
       return res.status(400).json({ error: "Invalid or expired token" });
+    }
+
+    // Find user by verification token and check expiry
+    const user = await User.findOne({
+      _id: decoded._id,
+      verificationToken: token,
+      verificationTokenExpires: { $gt: Date.now() }
+    });
+
+    if (!user) {
+      return res.status(400).json({ 
+        error: "Invalid or expired token",
+        expired: true 
+      });
     }
 
     // Mark user as verified
     user.isVerified = true;
     user.verificationToken = undefined;
+    user.verificationTokenExpires = undefined;
     await user.save();
 
     // Generate JWT token (login token, with default expiry of "1h")
     const authToken = generateToken({ _id: user._id });
-    res.status(200).json({ message: "Email verified successfully", token: authToken });
+    res.status(200).json({ 
+      message: "Email verified successfully", 
+      token: authToken,
+      user: {
+        _id: user._id,
+        name: user.name,
+        username: user.username,
+        email: user.email,
+      }
+    });
   } catch (error) {
     console.error("Email Verification Error:", error);
     res.status(500).json({ error: "Verification failed" });
@@ -121,7 +195,11 @@ exports.login = async (req, res) => {
 
     // Check if user is verified
     if (!user.isVerified) {
-      return res.status(400).json({ error: "Please verify your email" });
+      return res.status(400).json({ 
+        error: "Please verify your email before logging in",
+        needsVerification: true,
+        email: user.email
+      });
     }
 
     // Generate JWT token with 30-day expiry
@@ -220,9 +298,6 @@ exports.getUserData = async (req, res) => {
     res.status(500).json({ error: "Internal Server Error" });
   }
 };
-// File: src/routes/authRoutes.js (ensure route returns role)
-
-
 
 /**
  * Update Password
