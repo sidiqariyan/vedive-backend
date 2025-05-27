@@ -2,7 +2,7 @@ const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
-const { sendVerificationEmail, sendResetPasswordEmail } = require("../utils/sendEmail");
+const { sendVerificationEmail, sendResetPasswordEmail } = require("../utils/sendEmailToken");
 require("dotenv").config();
 bcrypt.setRandomFallback(crypto.randomBytes);
 
