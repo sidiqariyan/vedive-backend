@@ -24,6 +24,7 @@ const ANTI_SPAM_CONFIG = {
     'free', 'urgent', 'limited time', 'act now', 'click here',
     'guaranteed', 'no obligation', 'risk free', 'special promotion',
     'winner', 'congratulations', 'cash', 'money back', '$']
+}
 
 // Helper function to validate file type
 const validateFileType = (file, allowedTypes) => {
