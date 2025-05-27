@@ -2,15 +2,16 @@ const nodemailer = require("nodemailer");
 require("dotenv").config();
 
 // Create transporter
-const transporter = nodemailer.createTransporter({
+const transporter = nodemailer.createTransport({
   host: process.env.EMAIL_HOST,
   port: process.env.EMAIL_PORT || 587,
-  secure: false, // true for 465, false for other ports
+  secure: false, // true for port 465
   auth: {
     user: process.env.EMAIL_USER,
-    pass: process.env.EMAIL_PASS,
-  },
+    pass: process.env.EMAIL_PASS
+  }
 });
+
 
 // Beautiful HTML template for verification email
 const getVerificationEmailTemplate = (name, verificationUrl) => {
