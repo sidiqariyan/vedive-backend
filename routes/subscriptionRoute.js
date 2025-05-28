@@ -141,7 +141,23 @@ router.post("/subscribe", authenticate, async (req, res) => {
 
   } catch (err) {
     console.error("Subscribe error:", err);
-    res.status(500).json({ error: "Failed to create subscription order", details: err.response?.data });
+    res.status(500).json({ error: "Failed to create subscription order" });
+  }
+});
+
+// GET /status - Get subscription status
+router.get("/status", authenticate, async (req, res) => {
+  try {
+    const user = req.user;
+    const subscriptionInfo = {
+      status: user.subscriptionStatus || "inactive",
+      currentPlan: user.currentPlan || "Free",
+      subscriptionEndDate: user.subscriptionEndDate || null,
+    };
+    res.json(subscriptionInfo);
+  } catch (err) {
+    console.error("Error fetching subscription status:", err);
+    res.status(500).json({ error: "Failed to fetch subscription status" });
   }
 });
 
