@@ -1,5 +1,3 @@
-// controllers/auth.js
-
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const jwt = require("jsonwebtoken");
@@ -56,10 +54,13 @@ exports.register = async (req, res) => {
     // Generate verification token with 15-minute expiry
     const verificationToken = generateToken({ _id: user._id }, "15m");
     user.verificationToken = verificationToken;
-    user.verificationTokenExpires = Date.now() + 900000; // 15 minutes (15 * 60 * 1000)
+    user.verificationTokenExpires = Date.now() + 900000; // 15 minutes
     await user.save();
 
-    // Build the verification URL using the FRONTEND_URL environment variable
+    // Log the token generation time
+    console.log("Verification token generated at:", new Date().toISOString());
+
+    // Build the verification URL
     const verificationUrl = `${process.env.FRONTEND_URL}/verify-email?token=${verificationToken}`;
     await sendVerificationEmail(email, verificationUrl, name);
 
@@ -100,8 +101,11 @@ exports.resendVerification = async (req, res) => {
     // Generate new verification token with 15-minute expiry
     const verificationToken = generateToken({ _id: user._id }, "15m");
     user.verificationToken = verificationToken;
-    user.verificationTokenExpires = Date.now() + 900000; // 15 minutes (15 * 60 * 1000)
+    user.verificationTokenExpires = Date.now() + 900000; // 15 minutes
     await user.save();
+
+    // Log the token generation time
+    console.log("Resend verification token generated at:", new Date().toISOString());
 
     // Build the verification URL
     const verificationUrl = `${process.env.FRONTEND_URL}/verify-email?token=${verificationToken}`;
@@ -128,10 +132,13 @@ exports.verifyEmail = async (req, res) => {
       return res.status(400).json({ error: "Token is required" });
     }
 
-    // Verify JWT token first
+    // Log the verification attempt time
+    console.log("Verification attempted at:", new Date().toISOString());
+
+    // Verify JWT token with clock tolerance
     let decoded;
     try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET);
+      decoded = jwt.verify(token, process.env.JWT_SECRET, { clockTolerance: 60 });
     } catch (jwtError) {
       if (jwtError.name === 'TokenExpiredError') {
         return res.status(400).json({ 
@@ -162,7 +169,7 @@ exports.verifyEmail = async (req, res) => {
     user.verificationTokenExpires = undefined;
     await user.save();
 
-    // Generate JWT token (login token, with default expiry of "1h")
+    // Generate JWT token (login token)
     const authToken = generateToken({ _id: user._id });
     res.status(200).json({ 
       message: "Email verified successfully", 
@@ -250,6 +257,9 @@ exports.forgotPassword = async (req, res) => {
     user.resetPasswordExpires = Date.now() + 3600000; // 1 hour
     await user.save();
 
+    // Log the reset token generation time
+    console.log("Reset password token generated at:", new Date().toISOString());
+
     // Send reset password email
     const resetUrl = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}`;
     await sendResetPasswordEmail(email, resetUrl);
@@ -275,10 +285,10 @@ exports.resetPassword = async (req, res) => {
       return res.status(400).json({ error: "Token and new password are required" });
     }
 
-    // Verify JWT token first
+    // Verify JWT token with clock tolerance
     let decoded;
     try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET);
+      decoded = jwt.verify(token, process.env.JWT_SECRET, { clockTolerance: 60 });
     } catch (jwtError) {
       if (jwtError.name === 'TokenExpiredError') {
         return res.status(400).json({ 
