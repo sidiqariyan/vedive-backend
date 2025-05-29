@@ -11,6 +11,7 @@ const UserSchema = new mongoose.Schema(
     role: { type: String, enum: ["user", "admin"], default: "user" },
     isVerified: { type: Boolean, default: false },
     verificationToken: { type: String },
+    verificationTokenExpires: { type: Date }, // Add this missing field
     resetPasswordToken: { type: String },
     resetPasswordExpires: { type: Date },
     // Subscription-related fields
