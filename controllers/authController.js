@@ -124,7 +124,7 @@ exports.resendVerification = async (req, res) => {
  * Verify Email
  * @route GET /api/auth/verify-email
  */
-export.verifyEmail = async (req, res) => {
+exports.verifyEmail = async (req, res) => {
   const { token } = req.query;
   if (!token) {
     return res.status(400).json({ error: "Token is required" });
