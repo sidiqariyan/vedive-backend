@@ -83,7 +83,7 @@ const getVerificationEmailTemplate = (name, verificationUrl, expiryMinutes = 15)
       display: inline-block;
       padding: 12px 24px;
       background-color: #3e5fff;
-      color: #ffffff;
+      color: #ffffff !important;
       text-decoration: none;
       border-radius: 24px;
       font-weight: bold;
