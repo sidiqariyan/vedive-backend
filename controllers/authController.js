@@ -50,24 +50,37 @@ exports.register = async (req, res) => {
 
     // Save the user to the database
     await user.save();
+    console.log("User created with ID:", user._id);
 
     // Generate verification token with 15-minute expiry
     const verificationToken = generateToken({ _id: user._id }, "15m");
+    const tokenExpires = Date.now() + 900000; // 15 minutes
+    
     user.verificationToken = verificationToken;
-    user.verificationTokenExpires = Date.now() + 900000; // 15 minutes
+    user.verificationTokenExpires = tokenExpires;
     await user.save();
 
-    // Log the token generation time
+    // Log detailed information for debugging
     console.log("Verification token generated at:", new Date().toISOString());
+    console.log("Token expires at:", new Date(tokenExpires).toISOString());
+    console.log("User ID in token:", user._id.toString());
+    console.log("Token (first 20 chars):", verificationToken.substring(0, 20) + "...");
 
     // Build the verification URL
     const verificationUrl = `${process.env.FRONTEND_URL}/verify-email?token=${verificationToken}`;
+    console.log("Verification URL:", verificationUrl);
+    
     await sendVerificationEmail(email, verificationUrl, name);
 
     // Respond with success message
     res.status(201).json({ 
       message: "User registered successfully. Please check your email to verify your account. The link will expire in 15 minutes.",
-      email: email 
+      email: email,
+      // Remove this debug info in production
+      debug: {
+        userId: user._id,
+        tokenExpires: new Date(tokenExpires).toISOString()
+      }
     });
   } catch (error) {
     console.error("Registration Error:", error);
@@ -126,12 +139,19 @@ exports.resendVerification = async (req, res) => {
  */
 exports.verifyEmail = async (req, res) => {
   const { token } = req.query;
+  
   if (!token) {
     return res.status(400).json({ error: "Token is required" });
   }
 
   try {
+    // Verify JWT token with clock tolerance
     const decoded = jwt.verify(token, process.env.JWT_SECRET, { clockTolerance: 60 });
+    
+    console.log("Token decoded successfully:", decoded);
+    console.log("Looking for user with ID:", decoded._id);
+    
+    // Find user with matching token and check expiration
     const user = await User.findOne({
       _id: decoded._id,
       verificationToken: token,
@@ -139,26 +159,97 @@ exports.verifyEmail = async (req, res) => {
     });
 
     if (!user) {
-      return res.status(400).json({ error: "Invalid or expired verification token" });
+      console.log("User not found or token expired");
+      return res.status(400).json({ 
+        error: "Invalid or expired verification token",
+        expired: true 
+      });
     }
 
-    // Proceed with verification logic...
+    // Check if user is already verified
+    if (user.isVerified) {
+      return res.status(400).json({ 
+        error: "Email is already verified" 
+      });
+    }
+
+    // Mark user as verified and clear verification token
+    user.isVerified = true;
+    user.verificationToken = undefined;
+    user.verificationTokenExpires = undefined;
+    await user.save();
+
+    console.log("User verified successfully:", user.email);
+
+    // Generate login token for auto-login after verification
+    const loginToken = generateToken({ _id: user._id }, "30d");
+
+    res.status(200).json({
+      message: "Email verified successfully! Welcome to Vedive.",
+      token: loginToken,
+      user: {
+        _id: user._id,
+        name: user.name,
+        username: user.username,
+        email: user.email,
+        isVerified: user.isVerified
+      }
+    });
+
   } catch (jwtError) {
+    console.error("JWT Error:", jwtError);
+    
     if (jwtError.name === 'TokenExpiredError') {
-      const payload = jwt.decode(token); // Decode without verification
-      const currentTime = Math.floor(Date.now() / 1000); // Current time in seconds
-      const tokenExp = payload.exp; // Token's expiration time in seconds
-      const timeDifference = tokenExp - currentTime; // Positive if token is still valid
-      console.log(`Token expired: currentTime=${currentTime}, tokenExp=${tokenExp}, timeLeft=${timeDifference} seconds`);
+      // Even if JWT is expired, check database expiration
+      try {
+        const payload = jwt.decode(token); // Decode without verification
+        const user = await User.findOne({
+          _id: payload._id,
+          verificationToken: token
+        });
+        
+        if (user && user.verificationTokenExpires > Date.now()) {
+          // Database token is still valid, JWT clock issue
+          console.log("JWT expired but database token still valid");
+          
+          // Mark user as verified
+          user.isVerified = true;
+          user.verificationToken = undefined;
+          user.verificationTokenExpires = undefined;
+          await user.save();
+
+          const loginToken = generateToken({ _id: user._id }, "30d");
+          
+          return res.status(200).json({
+            message: "Email verified successfully! Welcome to Vedive.",
+            token: loginToken,
+            user: {
+              _id: user._id,
+              name: user.name,
+              username: user.username,
+              email: user.email,
+              isVerified: user.isVerified
+            }
+          });
+        }
+      } catch (fallbackError) {
+        console.error("Fallback verification failed:", fallbackError);
+      }
+      
       return res.status(400).json({
         error: "Verification link has expired. Please request a new one.",
         expired: true
       });
     }
+    
     console.log(`Token verification error: ${jwtError.message}`);
-    return res.status(400).json({ error: "Invalid token" });
+    return res.status(400).json({ 
+      error: "Invalid verification token",
+      expired: false 
+    });
   }
 };
+
 /**
  * Login User
  * @route POST /api/auth/login
