@@ -124,32 +124,14 @@ exports.resendVerification = async (req, res) => {
  * Verify Email
  * @route GET /api/auth/verify-email
  */
-exports.verifyEmail = async (req, res) => {
+export.verifyEmail = async (req, res) => {
+  const { token } = req.query;
+  if (!token) {
+    return res.status(400).json({ error: "Token is required" });
+  }
+
   try {
-    const { token } = req.query;
-
-    if (!token) {
-      return res.status(400).json({ error: "Token is required" });
-    }
-
-    // Log the verification attempt time
-    console.log("Verification attempted at:", new Date().toISOString());
-
-    // Verify JWT token with clock tolerance
-    let decoded;
-    try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET, { clockTolerance: 60 });
-    } catch (jwtError) {
-      if (jwtError.name === 'TokenExpiredError') {
-        return res.status(400).json({ 
-          error: "Verification link has expired. Please request a new one.",
-          expired: true 
-        });
-      }
-      return res.status(400).json({ error: "Invalid token" });
-    }
-
-    // Find user by verification token and check expiry
+    const decoded = jwt.verify(token, process.env.JWT_SECRET, { clockTolerance: 60 });
     const user = await User.findOne({
       _id: decoded._id,
       verificationToken: token,
@@ -157,36 +139,26 @@ exports.verifyEmail = async (req, res) => {
     });
 
     if (!user) {
-      return res.status(400).json({ 
-        error: "Verification link has expired or is invalid. Please request a new one.",
-        expired: true 
-      });
+      return res.status(400).json({ error: "Invalid or expired verification token" });
     }
 
-    // Mark user as verified
-    user.isVerified = true;
-    user.verificationToken = undefined;
-    user.verificationTokenExpires = undefined;
-    await user.save();
-
-    // Generate JWT token (login token)
-    const authToken = generateToken({ _id: user._id });
-    res.status(200).json({ 
-      message: "Email verified successfully", 
-      token: authToken,
-      user: {
-        _id: user._id,
-        name: user.name,
-        username: user.username,
-        email: user.email,
-      }
-    });
-  } catch (error) {
-    console.error("Email Verification Error:", error);
-    res.status(500).json({ error: "Verification failed" });
+    // Proceed with verification logic...
+  } catch (jwtError) {
+    if (jwtError.name === 'TokenExpiredError') {
+      const payload = jwt.decode(token); // Decode without verification
+      const currentTime = Math.floor(Date.now() / 1000); // Current time in seconds
+      const tokenExp = payload.exp; // Token's expiration time in seconds
+      const timeDifference = tokenExp - currentTime; // Positive if token is still valid
+      console.log(`Token expired: currentTime=${currentTime}, tokenExp=${tokenExp}, timeLeft=${timeDifference} seconds`);
+      return res.status(400).json({
+        error: "Verification link has expired. Please request a new one.",
+        expired: true
+      });
+    }
+    console.log(`Token verification error: ${jwtError.message}`);
+    return res.status(400).json({ error: "Invalid token" });
   }
 };
-
 /**
  * Login User
  * @route POST /api/auth/login
