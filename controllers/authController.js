@@ -1,3 +1,5 @@
+// controllers/auth.js
+
 const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const jwt = require("jsonwebtoken");
@@ -51,10 +53,10 @@ exports.register = async (req, res) => {
     // Save the user to the database
     await user.save();
 
-    // Generate verification token with a 15-minute expiry
-    const verificationToken = generateToken({ _id: user._id }, "15m");
+    // Generate verification token with a 1-hour expiry
+    const verificationToken = generateToken({ _id: user._id }, "1h");
     user.verificationToken = verificationToken;
-    user.verificationTokenExpires = Date.now() + 900000; // 15 minutes
+    user.verificationTokenExpires = Date.now() + 3600000; // 1 hour
     await user.save();
 
     // Build the verification URL using the FRONTEND_URL environment variable
@@ -95,10 +97,10 @@ exports.resendVerification = async (req, res) => {
       return res.status(400).json({ error: "Email is already verified" });
     }
 
-    // Generate new verification token with 15-minute expiry
-    const verificationToken = generateToken({ _id: user._id }, "15m");
+    // Generate new verification token with 1-hour expiry
+    const verificationToken = generateToken({ _id: user._id }, "1h");
     user.verificationToken = verificationToken;
-    user.verificationTokenExpires = Date.now() + 900000; // 15 minutes
+    user.verificationTokenExpires = Date.now() + 3600000; // 1 hour
     await user.save();
 
     // Build the verification URL
@@ -109,231 +111,5 @@ exports.resendVerification = async (req, res) => {
   } catch (error) {
     console.error("Resend Verification Error:", error);
     res.status(500).json({ error: "Failed to resend verification email" });
-  }
-};
-
-/**
- * Verify Email
- * @route GET /api/auth/verify-email
- */
-exports.verifyEmail = async (req, res) => {
-  try {
-    const { token } = req.query;
-
-    if (!token) {
-      return res.status(400).json({ error: "Token is required" });
-    }
-
-    // Verify JWT token first
-    let decoded;
-    try {
-      decoded = jwt.verify(token, process.env.JWT_SECRET);
-    } catch (jwtError) {
-      return res.status(400).json({ error: "Invalid or expired token" });
-    }
-
-    // Find user by verification token and check expiry
-    const user = await User.findOne({
-      _id: decoded._id,
-      verificationToken: token,
-      verificationTokenExpires: { $gt: Date.now() }
-    });
-
-    if (!user) {
-      return res.status(400).json({ 
-        error: "Invalid or expired token",
-        expired: true 
-      });
-    }
-
-    // Mark user as verified
-    user.isVerified = true;
-    user.verificationToken = undefined;
-    user.verificationTokenExpires = undefined;
-    await user.save();
-
-    // Generate JWT token (login token, with default expiry of "1h")
-    const authToken = generateToken({ _id: user._id });
-    res.status(200).json({ 
-      message: "Email verified successfully", 
-      token: authToken,
-      user: {
-        _id: user._id,
-        name: user.name,
-        username: user.username,
-        email: user.email,
-      }
-    });
-  } catch (error) {
-    console.error("Email Verification Error:", error);
-    res.status(500).json({ error: "Verification failed" });
-  }
-};
-
-/**
- * Login User
- * @route POST /api/auth/login
- */
-exports.login = async (req, res) => {
-  try {
-    const { emailOrUsername, password } = req.body;
-
-    // Find user by email or username
-    const user = await User.findOne({
-      $or: [{ email: emailOrUsername }, { username: emailOrUsername }],
-    });
-
-    if (!user) {
-      return res.status(400).json({ error: "Invalid credentials" });
-    }
-
-    // Check if password matches
-    const isMatch = await bcrypt.compare(password, user.password);
-    if (!isMatch) {
-      return res.status(400).json({ error: "Invalid credentials" });
-    }
-
-    // Check if user is verified
-    if (!user.isVerified) {
-      return res.status(400).json({ 
-        error: "Please verify your email before logging in",
-        needsVerification: true,
-        email: user.email
-      });
-    }
-
-    // Generate JWT token with 30-day expiry
-    const token = generateToken({ _id: user._id }, '30d');
-    res.status(200).json({
-      message: "Login successful",
-      token,
-      user: {
-        _id: user._id,
-        name: user.name,
-        username: user.username,
-        email: user.email,
-      },
-    });
-  } catch (error) {
-    console.error("Login Error:", error);
-    res.status(500).json({ error: "Login failed" });
-  }
-};
-
-/**
- * Forgot Password
- * @route POST /api/auth/forgot-password
- */
-exports.forgotPassword = async (req, res) => {
-  try {
-    const { email } = req.body;
-
-    // Find user by email
-    const user = await User.findOne({ email });
-    if (!user) {
-      return res.status(400).json({ error: "User not found" });
-    }
-
-    // Generate reset password token (using default expiry "1h")
-    const resetToken = generateToken({ _id: user._id });
-    user.resetPasswordToken = resetToken;
-    user.resetPasswordExpires = Date.now() + 3600000; // 1 hour
-    await user.save();
-
-    // Send reset password email
-    const resetUrl = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}`;
-    await sendResetPasswordEmail(email, resetUrl);
-
-    res.status(200).json({ message: "Password reset link sent to your email" });
-  } catch (error) {
-    console.error("Forgot Password Error:", error);
-    res.status(500).json({ error: "Failed to send reset link" });
-  }
-};
-
-/**
- * Reset Password
- * @route POST /api/auth/reset-password
- */
-exports.resetPassword = async (req, res) => {
-  try {
-    const { token, newPassword } = req.body;
-
-    // Find user by reset token and check if token has not expired
-    const user = await User.findOne({
-      resetPasswordToken: token,
-      resetPasswordExpires: { $gt: Date.now() },
-    });
-    if (!user) {
-      return res.status(400).json({ error: "Invalid or expired token" });
-    }
-
-    // Hash new password
-    const hashedPassword = await bcrypt.hash(newPassword, 10);
-
-    // Update user's password and clear reset token fields
-    user.password = hashedPassword;
-    user.resetPasswordToken = undefined;
-    user.resetPasswordExpires = undefined;
-    await user.save();
-
-    res.status(200).json({ message: "Password reset successful" });
-  } catch (error) {
-    console.error("Password Reset Error:", error);
-    res.status(500).json({ error: "Password reset failed" });
-  }
-};
-
-/**
- * Fetch User Data
- * @route GET /api/auth/me
- */
-exports.getUserData = async (req, res) => {
-  try {
-    const user = await User.findById(req.user.id).select("name username email role");
-    if (!user) return res.status(404).json({ error: "User not found" });
-    res.json(user);
-  } catch (error) {
-    console.error("Error fetching user data:", error);
-    res.status(500).json({ error: "Internal Server Error" });
-  }
-};
-
-/**
- * Update Password
- * @route POST /api/auth/update-password
- */
-exports.updatePassword = async (req, res) => {
-  try {
-    const { currentPassword, newPassword } = req.body;
-
-    // Validate required fields
-    if (!currentPassword || !newPassword) {
-      return res.status(400).json({ error: "Both currentPassword and newPassword are required" });
-    }
-
-    // Find the user by ID
-    const user = await User.findById(req.user._id);
-    if (!user) {
-      return res.status(404).json({ error: "User not found" });
-    }
-
-    // Compare the provided current password with the stored password
-    const isMatch = await bcrypt.compare(currentPassword, user.password);
-    if (!isMatch) {
-      return res.status(400).json({ error: "Current password is incorrect" });
-    }
-
-    // Hash the new password
-    const hashedPassword = await bcrypt.hash(newPassword, 10);
-
-    // Update the user's password
-    user.password = hashedPassword;
-    await user.save();
-
-    res.json({ message: "Password updated successfully" });
-  } catch (error) {
-    console.error("Error updating password:", error);
-    res.status(500).json({ error: "Failed to update password" });
   }
 };
