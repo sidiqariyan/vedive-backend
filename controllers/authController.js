@@ -53,10 +53,10 @@ exports.register = async (req, res) => {
     // Save the user to the database
     await user.save();
 
-    // Generate verification token with a 1-hour expiry
-    const verificationToken = generateToken({ _id: user._id }, "1h");
+    // Generate verification token with 15-minute expiry
+    const verificationToken = generateToken({ _id: user._id }, "15m");
     user.verificationToken = verificationToken;
-    user.verificationTokenExpires = Date.now() + 3600000; // 1 hour
+    user.verificationTokenExpires = Date.now() + 900000; // 15 minutes (15 * 60 * 1000)
     await user.save();
 
     // Build the verification URL using the FRONTEND_URL environment variable
@@ -65,7 +65,7 @@ exports.register = async (req, res) => {
 
     // Respond with success message
     res.status(201).json({ 
-      message: "User registered successfully. Please check your email to verify your account.",
+      message: "User registered successfully. Please check your email to verify your account. The link will expire in 15 minutes.",
       email: email 
     });
   } catch (error) {
@@ -97,58 +97,19 @@ exports.resendVerification = async (req, res) => {
       return res.status(400).json({ error: "Email is already verified" });
     }
 
-    // Generate new verification token with 1-hour expiry
-    const verificationToken = generateToken({ _id: user._id }, "1h");
-    user.verificationToken = verificationToken;
-    user.verificationTokenExpires = Date.now() + 3600000; // 1 hour
-    await user.save();
-
-    // Build the verification URL
-    const verificationUrl = `${process.env.FRONTEND_URL}/verify-email?token=${verificationToken}`;
-    await sendVerificationEmail(email, verificationUrl, user.name);
-
-    res.status(200).json({ message: "Verification email sent successfully" });
-  } catch (error) {
-    console.error("Resend Verification Error:", error);
-    res.status(500).json({ error: "Failed to resend verification email" });
-  }
-};
-
-
-/**
- * Resend Verification Email
- * @route POST /api/auth/resend-verification
- */
-exports.resendVerification = async (req, res) => {
-  try {
-    const { email } = req.body;
-
-    if (!email) {
-      return res.status(400).json({ error: "Email is required" });
-    }
-
-    // Find user by email
-    const user = await User.findOne({ email });
-    if (!user) {
-      return res.status(400).json({ error: "User not found" });
-    }
-
-    // Check if user is already verified
-    if (user.isVerified) {
-      return res.status(400).json({ error: "Email is already verified" });
-    }
-
     // Generate new verification token with 15-minute expiry
     const verificationToken = generateToken({ _id: user._id }, "15m");
     user.verificationToken = verificationToken;
-    user.verificationTokenExpires = Date.now() + 900000; // 15 minutes
+    user.verificationTokenExpires = Date.now() + 900000; // 15 minutes (15 * 60 * 1000)
     await user.save();
 
     // Build the verification URL
     const verificationUrl = `${process.env.FRONTEND_URL}/verify-email?token=${verificationToken}`;
     await sendVerificationEmail(email, verificationUrl, user.name);
 
-    res.status(200).json({ message: "Verification email sent successfully" });
+    res.status(200).json({ 
+      message: "Verification email sent successfully. The link will expire in 15 minutes." 
+    });
   } catch (error) {
     console.error("Resend Verification Error:", error);
     res.status(500).json({ error: "Failed to resend verification email" });
@@ -172,7 +133,13 @@ exports.verifyEmail = async (req, res) => {
     try {
       decoded = jwt.verify(token, process.env.JWT_SECRET);
     } catch (jwtError) {
-      return res.status(400).json({ error: "Invalid or expired token" });
+      if (jwtError.name === 'TokenExpiredError') {
+        return res.status(400).json({ 
+          error: "Verification link has expired. Please request a new one.",
+          expired: true 
+        });
+      }
+      return res.status(400).json({ error: "Invalid token" });
     }
 
     // Find user by verification token and check expiry
@@ -184,7 +151,7 @@ exports.verifyEmail = async (req, res) => {
 
     if (!user) {
       return res.status(400).json({ 
-        error: "Invalid or expired token",
+        error: "Verification link has expired or is invalid. Please request a new one.",
         expired: true 
       });
     }
@@ -277,8 +244,8 @@ exports.forgotPassword = async (req, res) => {
       return res.status(400).json({ error: "User not found" });
     }
 
-    // Generate reset password token (using default expiry "1h")
-    const resetToken = generateToken({ _id: user._id });
+    // Generate reset password token with 1-hour expiry
+    const resetToken = generateToken({ _id: user._id }, "1h");
     user.resetPasswordToken = resetToken;
     user.resetPasswordExpires = Date.now() + 3600000; // 1 hour
     await user.save();
@@ -287,7 +254,9 @@ exports.forgotPassword = async (req, res) => {
     const resetUrl = `${process.env.FRONTEND_URL}/reset-password?token=${resetToken}`;
     await sendResetPasswordEmail(email, resetUrl);
 
-    res.status(200).json({ message: "Password reset link sent to your email" });
+    res.status(200).json({ 
+      message: "Password reset link sent to your email. The link will expire in 1 hour." 
+    });
   } catch (error) {
     console.error("Forgot Password Error:", error);
     res.status(500).json({ error: "Failed to send reset link" });
@@ -302,13 +271,36 @@ exports.resetPassword = async (req, res) => {
   try {
     const { token, newPassword } = req.body;
 
+    if (!token || !newPassword) {
+      return res.status(400).json({ error: "Token and new password are required" });
+    }
+
+    // Verify JWT token first
+    let decoded;
+    try {
+      decoded = jwt.verify(token, process.env.JWT_SECRET);
+    } catch (jwtError) {
+      if (jwtError.name === 'TokenExpiredError') {
+        return res.status(400).json({ 
+          error: "Reset password link has expired. Please request a new one.",
+          expired: true 
+        });
+      }
+      return res.status(400).json({ error: "Invalid token" });
+    }
+
     // Find user by reset token and check if token has not expired
     const user = await User.findOne({
+      _id: decoded._id,
       resetPasswordToken: token,
       resetPasswordExpires: { $gt: Date.now() },
     });
+    
     if (!user) {
-      return res.status(400).json({ error: "Invalid or expired token" });
+      return res.status(400).json({ 
+        error: "Reset password link has expired or is invalid. Please request a new one.",
+        expired: true 
+      });
     }
 
     // Hash new password
