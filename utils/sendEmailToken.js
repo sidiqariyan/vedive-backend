@@ -135,7 +135,7 @@ const getVerificationEmailTemplate = (name, verificationUrl, expiryMinutes = 15)
 <body>
   <div class="email-container">
     <div class="header">
-      <img class="logo" src="https://your-domain.com/Group4.png" alt="Company Logo" />
+      <img class="logo" src="https://postimg.cc/bDqY1gDM" alt="Company Logo" />
     </div>
     <div class="content">
       <h1>Welcome to our community</h1>
@@ -145,12 +145,12 @@ const getVerificationEmailTemplate = (name, verificationUrl, expiryMinutes = 15)
       <p class="notice">Trouble with the button? Copy & paste this link:</p>
       <p class="link-copy">${verificationUrl}</p>
     </div>
-    <div class="illustration"></div>
+    <div class="illustration" id="illustration" style="background-image: url('https://postimg.cc/BXb6hmYf');"></div>
     <div class="footer">
       <div class="social-icons">
-        <a href="#"><img src="https://your-domain.com/Facebook_logo_(square)1(1).png" alt="Facebook"></a>
-        <a href="#"><img src="https://your-domain.com/Instagram_logo_2016.svg2(1).png" alt="Instagram"></a>
-        <a href="#"><img src="https://your-domain.com/linkedin-logo-linkedin-logo-transparent-linkedin-icon-transparent-free-free-png1(1).png" alt="LinkedIn"></a>
+        <a href="#"><img src="https://postimg.cc/TpsPBnFL" alt="Facebook"></a>
+        <a href="#"><img src="https://postimg.cc/cv8JWrGDg" alt="Instagram"></a>
+        <a href="#"><img src="https://postimg.cc/NyqjjBgQ" alt="LinkedIn"></a>
       </div>
       <div class="links">
         <a href="https://vedive.com/privacy-policy">Privacy</a>|
@@ -158,7 +158,7 @@ const getVerificationEmailTemplate = (name, verificationUrl, expiryMinutes = 15)
         <a href="#">Unsubscribe</a>
       </div>
       <div class="bottom-logo">
-        <img src="https://your-domain.com/Group401.png" alt="Company Logo">
+        <img src="https://postimg.cc/06Y26FQD" alt="Company Logo">
       </div>
     </div>
   </div>
