@@ -43,12 +43,28 @@ router.get(
 );
 
 // Optional: handle failure
-router.get("/google/failure", (req, res) => {
-  return res.status(401).json({ error: "Google Authentication Failed" });
+router.get("/google/debug", (req, res) => {
+  res.json({
+    googleClientId: process.env.GOOGLE_CLIENT_ID ? 'Set' : 'Not set',
+    googleCallbackUrl: process.env.GOOGLE_CALLBACK_URL,
+    serverUrl: req.protocol + '://' + req.get('host'),
+    fullCallbackUrl: req.protocol + '://' + req.get('host') + '/api/auth/google/callback'
+  });
 });
-router.get("/google", (req, res, next) => {
-  console.log("Google OAuth callback URL:", process.env.GOOGLE_CALLBACK_URL);
-  next();
-}, passport.authenticate("google", { scope: ["profile", "email"] }));
+
+// Your existing Google OAuth route with debug logging
+router.get(
+  "/google",
+  (req, res, next) => {
+    console.log("=== GOOGLE OAUTH DEBUG ===");
+    console.log("Callback URL from env:", process.env.GOOGLE_CALLBACK_URL);
+    console.log("Server host:", req.get('host'));
+    console.log("Protocol:", req.protocol);
+    console.log("Full URL:", req.protocol + '://' + req.get('host') + req.originalUrl);
+    console.log("========================");
+    next();
+  },
+  passport.authenticate("google", { scope: ["profile", "email"] })
+);
 
 module.exports = router;
