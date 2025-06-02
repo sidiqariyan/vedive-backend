@@ -2,13 +2,12 @@
 const passport = require("passport");
 const GoogleStrategy = require("passport-google-oauth20").Strategy;
 const jwt = require("jsonwebtoken");
+const crypto = require("crypto");
 const User = require("../models/User");
 require("dotenv").config();
 
 /**
- * GENERATE and sign your JWT (same as your existing generateToken helper).
- * We’ll reuse your generateToken from authController so that
- * when Google auth “succeeds,” we hand the user back a JWT.
+ * Generate JWT token (same as your existing generateToken helper)
  */
 const generateToken = (payload, expiresIn = "30d") => {
   return jwt.sign(payload, process.env.JWT_SECRET, { expiresIn });
@@ -22,29 +21,19 @@ passport.use(
       callbackURL: process.env.GOOGLE_CALLBACK_URL,
     },
     async (accessToken, refreshToken, profile, done) => {
-      /*
-        When Google redirects back, `profile` contains:
-        - profile.id        → user’s unique Google ID (string)
-        - profile.displayName
-        - profile.emails[0].value
-        - profile.photos[0].value
-      */
       try {
+        // Check if user already exists with Google ID
         const existingUser = await User.findOne({ googleId: profile.id });
-
         if (existingUser) {
-          // User already signed up with Google before → produce JWT
-          const token = generateToken({ _id: existingUser._id });
+          // User already signed up with Google → generate JWT
+          const token = generateToken({ _id: existingUser._id }); // Fixed: _id not *id
           return done(null, { user: existingUser, token });
         }
 
-        // If email already exists under “normal” registration, you could either:
-        // 1. Link accounts by setting googleId on that existing user, or
-        // 2. Throw an error ("User with that email already exists—please use normal login or link.")  
-        // Below, we’ll assume we link automatically if email matches:
+        // Check if email already exists under normal registration
         const email = profile.emails[0].value.toLowerCase();
         const sameEmailUser = await User.findOne({ email });
-
+        
         if (sameEmailUser) {
           // Link Google to existing account
           sameEmailUser.googleId = profile.id;
@@ -52,37 +41,39 @@ passport.use(
           // Mark verified because Google gives us a verified email
           sameEmailUser.isVerified = true;
           await sameEmailUser.save();
-
-          const token = generateToken({ _id: sameEmailUser._id });
+          
+          const token = generateToken({ _id: sameEmailUser._id }); // Fixed: _id not *id
           return done(null, { user: sameEmailUser, token });
         }
 
-        // Otherwise, create brand-new user
+        // Create brand-new user
         const newUser = new User({
           name: profile.displayName || "Google User",
           username: profile.emails[0].value.split("@")[0] + Date.now(), // guarantee unique
           email: email,
-          password: crypto.randomBytes(16).toString("hex"), // dummy pass so that required field is satisfied
+          password: crypto.randomBytes(16).toString("hex"), // dummy password
           googleId: profile.id,
           photo: profile.photos?.[0]?.value || null,
           isVerified: true,
         });
-
+        
         await newUser.save();
-        const token = generateToken({ _id: newUser._id });
+        const token = generateToken({ _id: newUser._id }); // Fixed: _id not *id
         return done(null, { user: newUser, token });
+        
       } catch (err) {
+        console.error("Google OAuth Error:", err);
         return done(err, null);
       }
     }
   )
 );
 
-// Serialize / deserialize just pass the user object since we’re not using sessions (JWT only):
+// Serialize/deserialize for session-less JWT approach
 passport.serializeUser((payload, done) => {
-  // `payload` here is { user, token }
   done(null, payload); 
 });
+
 passport.deserializeUser((payload, done) => {
   done(null, payload);
 });
