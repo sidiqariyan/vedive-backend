@@ -46,5 +46,9 @@ router.get(
 router.get("/google/failure", (req, res) => {
   return res.status(401).json({ error: "Google Authentication Failed" });
 });
+router.get("/google", (req, res, next) => {
+  console.log("Google OAuth callback URL:", process.env.GOOGLE_CALLBACK_URL);
+  next();
+}, passport.authenticate("google", { scope: ["profile", "email"] }));
 
 module.exports = router;
