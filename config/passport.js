@@ -22,43 +22,72 @@ passport.use(
     },
     async (accessToken, refreshToken, profile, done) => {
       try {
+        console.log("Google OAuth Profile:", {
+          id: profile.id,
+          email: profile.emails?.[0]?.value,
+          name: profile.displayName
+        });
+
         // Check if user already exists with Google ID
         const existingUser = await User.findOne({ googleId: profile.id });
+        
         if (existingUser) {
+          console.log("Found existing Google user:", existingUser.email);
           // User already signed up with Google → generate JWT
-          const token = generateToken({ _id: existingUser._id }); // Fixed: _id not *id
+          const token = generateToken({ _id: existingUser._id });
           return done(null, { user: existingUser, token });
         }
 
         // Check if email already exists under normal registration
-        const email = profile.emails[0].value.toLowerCase();
+        const email = profile.emails?.[0]?.value?.toLowerCase();
+        if (!email) {
+          return done(new Error("No email provided by Google"), null);
+        }
+
         const sameEmailUser = await User.findOne({ email });
         
         if (sameEmailUser) {
+          console.log("Linking Google to existing account:", email);
           // Link Google to existing account
           sameEmailUser.googleId = profile.id;
           sameEmailUser.photo = profile.photos?.[0]?.value || null;
-          // Mark verified because Google gives us a verified email
-          sameEmailUser.isVerified = true;
+          sameEmailUser.isVerified = true; // Google gives us verified email
+          sameEmailUser.authProvider = 'google';
           await sameEmailUser.save();
           
-          const token = generateToken({ _id: sameEmailUser._id }); // Fixed: _id not *id
+          const token = generateToken({ _id: sameEmailUser._id });
           return done(null, { user: sameEmailUser, token });
         }
 
         // Create brand-new user
+        console.log("Creating new Google user:", email);
+        
+        // Generate unique username
+        let baseUsername = email.split("@")[0];
+        let username = baseUsername;
+        let counter = 1;
+        
+        // Ensure username is unique
+        while (await User.findOne({ username })) {
+          username = `${baseUsername}${counter}`;
+          counter++;
+        }
+
         const newUser = new User({
           name: profile.displayName || "Google User",
-          username: profile.emails[0].value.split("@")[0] + Date.now(), // guarantee unique
+          username: username,
           email: email,
-          password: crypto.randomBytes(16).toString("hex"), // dummy password
+          password: crypto.randomBytes(16).toString("hex"), // dummy password for Google users
           googleId: profile.id,
           photo: profile.photos?.[0]?.value || null,
           isVerified: true,
+          authProvider: 'google'
         });
         
         await newUser.save();
-        const token = generateToken({ _id: newUser._id }); // Fixed: _id not *id
+        console.log("Created new Google user:", newUser.email);
+        
+        const token = generateToken({ _id: newUser._id });
         return done(null, { user: newUser, token });
         
       } catch (err) {
