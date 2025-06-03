@@ -1,4 +1,4 @@
-// config/passport.js
+// config/passport.js - Fixed version
 const passport = require("passport");
 const GoogleStrategy = require("passport-google-oauth20").Strategy;
 const jwt = require("jsonwebtoken");
@@ -22,14 +22,14 @@ passport.use(
     },
     async (accessToken, refreshToken, profile, done) => {
       try {
-        console.log("Google OAuth Profile:", {
-          id: profile.id,
-          email: profile.emails?.[0]?.value,
-          name: profile.displayName
-        });
+        console.log("=== GOOGLE OAUTH STRATEGY ===");
+        console.log("Profile ID:", profile.id);
+        console.log("Profile Email:", profile.emails?.[0]?.value);
+        console.log("Profile Name:", profile.displayName);
+        console.log("=============================");
 
         // Check if user already exists with Google ID
-        const existingUser = await User.findOne({ googleId: profile.id });
+        let existingUser = await User.findOne({ googleId: profile.id });
         
         if (existingUser) {
           console.log("Found existing Google user:", existingUser.email);
@@ -41,10 +41,11 @@ passport.use(
         // Check if email already exists under normal registration
         const email = profile.emails?.[0]?.value?.toLowerCase();
         if (!email) {
+          console.error("No email provided by Google");
           return done(new Error("No email provided by Google"), null);
         }
 
-        const sameEmailUser = await User.findOne({ email });
+        let sameEmailUser = await User.findOne({ email });
         
         if (sameEmailUser) {
           console.log("Linking Google to existing account:", email);
@@ -53,7 +54,14 @@ passport.use(
           sameEmailUser.photo = profile.photos?.[0]?.value || null;
           sameEmailUser.isVerified = true; // Google gives us verified email
           sameEmailUser.authProvider = 'google';
-          await sameEmailUser.save();
+          
+          try {
+            await sameEmailUser.save();
+            console.log("Successfully linked Google account");
+          } catch (saveError) {
+            console.error("Error linking Google account:", saveError);
+            return done(saveError, null);
+          }
           
           const token = generateToken({ _id: sameEmailUser._id });
           return done(null, { user: sameEmailUser, token });
@@ -63,7 +71,7 @@ passport.use(
         console.log("Creating new Google user:", email);
         
         // Generate unique username
-        let baseUsername = email.split("@")[0];
+        let baseUsername = email.split("@")[0].replace(/[^a-zA-Z0-9]/g, '');
         let username = baseUsername;
         let counter = 1;
         
@@ -84,14 +92,19 @@ passport.use(
           authProvider: 'google'
         });
         
-        await newUser.save();
-        console.log("Created new Google user:", newUser.email);
+        try {
+          await newUser.save();
+          console.log("Created new Google user successfully:", newUser.email);
+        } catch (saveError) {
+          console.error("Error creating new Google user:", saveError);
+          return done(saveError, null);
+        }
         
         const token = generateToken({ _id: newUser._id });
         return done(null, { user: newUser, token });
         
       } catch (err) {
-        console.error("Google OAuth Error:", err);
+        console.error("Google OAuth Strategy Error:", err);
         return done(err, null);
       }
     }
