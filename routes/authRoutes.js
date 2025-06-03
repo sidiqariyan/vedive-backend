@@ -51,12 +51,20 @@ router.get(
 );
 
 // 2) Google OAuth callback - Improved error handling
+// routes/authRoutes.js - Updated Google OAuth callback
 router.get(
   "/google/callback",
   (req, res, next) => {
     console.log("=== GOOGLE CALLBACK RECEIVED ===");
     console.log("Query params:", req.query);
+    console.log("User-Agent:", req.get('User-Agent'));
     console.log("===============================");
+    
+    // Check for OAuth errors in query params
+    if (req.query.error) {
+      console.error("OAuth error in callback:", req.query.error);
+      return res.redirect(`${process.env.FRONTEND_URL}/oauth2/redirect?error=google_oauth_failed`);
+    }
     
     passport.authenticate("google", { 
       session: false,
@@ -83,10 +91,13 @@ router.get(
       console.log("User ID:", user._id);
       console.log("User email:", user.email);
       console.log("Token generated successfully");
-      console.log("Redirecting to:", `${process.env.FRONTEND_URL}/oauth2/redirect?token=${token.substring(0, 20)}...`);
+      
+      // Build the redirect URL with token
+      const redirectUrl = `${process.env.FRONTEND_URL}/oauth2/redirect?token=${encodeURIComponent(token)}`;
+      console.log("Redirecting to:", redirectUrl);
       
       // Redirect to frontend with token
-      res.redirect(`${process.env.FRONTEND_URL}/oauth2/redirect?token=${token}`);
+      res.redirect(redirectUrl);
     } catch (error) {
       console.error("Error in Google callback:", error);
       res.redirect(`${process.env.FRONTEND_URL}/oauth2/redirect?error=callback_error`);
@@ -94,30 +105,7 @@ router.get(
   }
 );
 
-// Handle authentication errors
-router.get("/google/error", (req, res) => {
-  console.log("Google OAuth error endpoint hit");
-  res.redirect(`${process.env.FRONTEND_URL}/oauth2/redirect?error=google_oauth_failed`);
-});
-
-// Test endpoint to verify Google user creation
-router.get("/test-google-users", async (req, res) => {
-  try {
-    const googleUsers = await User.find({ googleId: { $exists: true } })
-      .select('name email googleId photo authProvider createdAt')
-      .limit(10);
-    
-    res.json({
-      success: true,
-      count: googleUsers.length,
-      users: googleUsers
-    });
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
-
-// Test endpoint to verify JWT token
+// Enhanced token verification endpoint
 router.post("/verify-token", async (req, res) => {
   try {
     const { token } = req.body;
@@ -125,13 +113,18 @@ router.post("/verify-token", async (req, res) => {
       return res.status(400).json({ error: "Token required" });
     }
 
+    console.log("Verifying token for OAuth user");
+    
     const jwt = require("jsonwebtoken");
     const decoded = jwt.verify(token, process.env.JWT_SECRET);
     const user = await User.findById(decoded._id).select('-password');
     
     if (!user) {
+      console.error("User not found for token");
       return res.status(404).json({ error: "User not found" });
     }
+
+    console.log("Token verification successful for user:", user.email);
 
     res.json({
       success: true,
@@ -141,13 +134,15 @@ router.post("/verify-token", async (req, res) => {
         email: user.email,
         username: user.username,
         isVerified: user.isVerified,
-        authProvider: user.authProvider
+        authProvider: user.authProvider || 'email',
+        photo: user.photo
       }
     });
   } catch (error) {
     console.error("Token verification error:", error);
+    if (error.name === 'TokenExpiredError') {
+      return res.status(401).json({ error: "Token expired" });
+    }
     res.status(401).json({ error: "Invalid token" });
   }
 });
-
-module.exports = router;
