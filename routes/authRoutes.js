@@ -78,7 +78,7 @@ router.get(
 // Optional: handle Google OAuth failure
 router.get("/google/failure", (req, res) => {
   console.log("Google OAuth failed");
-  res.redirect(${process.env.FRONTEND_URL}/login?error=google_oauth_failed);
+  res.redirect(`${process.env.FRONTEND_URL}/login?error=google_oauth_failed`);
 });
 
 // Test endpoint to verify Google user creation
