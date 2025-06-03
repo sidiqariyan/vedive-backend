@@ -18,68 +18,50 @@ const generateToken = (payload, expiresIn = "1h") => {
 exports.register = async (req, res) => {
   try {
     const { name, username, email, password } = req.body;
-
-    // Validate required fields
     if (!name || !username || !email || !password) {
       return res.status(400).json({ error: "All fields are required" });
     }
-
-    // Ensure the password is a string
     if (typeof password !== "string") {
-      console.error("Invalid password type:", password, typeof password);
       return res.status(400).json({ error: "Password must be a string" });
     }
-
-    // Check if user already exists
     const existingUser = await User.findOne({ $or: [{ email }, { username }] });
     if (existingUser) {
       return res.status(400).json({ error: "User with this email or username already exists" });
     }
-
-    // Generate salt explicitly and hash the password
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
-
-    // Create a new user
     const user = new User({
       name,
       username,
       email,
       password: hashedPassword,
     });
-
-    // Save the user to the database
     await user.save();
-    console.log("User created with ID:", user._id);
 
-    // Generate verification token with 15-minute expiry
+    // Generate verification token for email verification
     const verificationToken = generateToken({ _id: user._id }, "15m");
-    const tokenExpires = Date.now() + 900000; // 15 minutes
-    
+    const tokenExpires = Date.now() + 900000;
     user.verificationToken = verificationToken;
     user.verificationTokenExpires = tokenExpires;
     await user.save();
 
-    // Log detailed information for debugging
-    console.log("Verification token generated at:", new Date().toISOString());
-    console.log("Token expires at:", new Date(tokenExpires).toISOString());
-    console.log("User ID in token:", user._id.toString());
-    console.log("Token (first 20 chars):", verificationToken.substring(0, 20) + "...");
+    // ✅ Generate authentication token for immediate login
+    const loginToken = generateToken({ _id: user._id }, "30d");
 
-    // Build the verification URL
+    // Build verification URL
     const verificationUrl = `${process.env.FRONTEND_URL}/verify-email?token=${verificationToken}`;
-    console.log("Verification URL:", verificationUrl);
-    
     await sendVerificationEmail(email, verificationUrl, name);
 
-    // Respond with success message
-    res.status(201).json({ 
-      message: "User registered successfully. Please check your email to verify your account. The link will expire in 15 minutes.",
-      email: email,
-      // Remove this debug info in production
-      debug: {
-        userId: user._id,
-        tokenExpires: new Date(tokenExpires).toISOString()
+    // ✅ Return authentication token in response
+    res.status(201).json({
+      message: "User registered successfully. Please check your email to verify your account.",
+      token: loginToken, // ✅ Authentication token for immediate login
+      user: {
+        _id: user._id,
+        name: user.name,
+        email: user.email,
+        isVerified: user.isVerified,
+        authProvider: "email"
       }
     });
   } catch (error) {
@@ -257,32 +239,18 @@ exports.verifyEmail = async (req, res) => {
 exports.login = async (req, res) => {
   try {
     const { emailOrUsername, password } = req.body;
-
-    // Find user by email or username
     const user = await User.findOne({
       $or: [{ email: emailOrUsername }, { username: emailOrUsername }],
     });
-
     if (!user) {
       return res.status(400).json({ error: "Invalid credentials" });
     }
-
-    // Check if password matches
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       return res.status(400).json({ error: "Invalid credentials" });
     }
 
-    // Check if user is verified
-    if (!user.isVerified) {
-      return res.status(400).json({ 
-        error: "Please verify your email before logging in",
-        needsVerification: true,
-        email: user.email
-      });
-    }
-
-    // Generate JWT token with 30-day expiry
+    // ✅ Remove email verification requirement for login
     const token = generateToken({ _id: user._id }, '30d');
     res.status(200).json({
       message: "Login successful",
@@ -290,9 +258,9 @@ exports.login = async (req, res) => {
       user: {
         _id: user._id,
         name: user.name,
-        username: user.username,
         email: user.email,
-      },
+        isVerified: user.isVerified
+      }
     });
   } catch (error) {
     console.error("Login Error:", error);
