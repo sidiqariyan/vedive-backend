@@ -1,3 +1,4 @@
+
 // routes/authRoutes.js
 const express = require("express");
 const router = express.Router();
@@ -31,21 +32,53 @@ router.get("/google/debug", (req, res) => {
 });
 
 // 1) Kick off Google OAuth
-// Add these routes to your existing authRoutes.js
-router.get('/google', 
-  passport.authenticate('google', { scope: ['profile', 'email'] }));
+router.get(
+  "/google",
+  (req, res, next) => {
+    console.log("=== GOOGLE OAUTH INITIATED ===");
+    console.log("Callback URL from env:", process.env.GOOGLE_CALLBACK_URL);
+    console.log("Server host:", req.get('host'));
+    console.log("Protocol:", req.protocol);
+    console.log("Full URL:", req.protocol + '://' + req.get('host') + req.originalUrl);
+    console.log("============================");
+    next();
+  },
+  passport.authenticate("google", { scope: ["profile", "email"] })
+);
 
-router.get('/google/callback', 
-  passport.authenticate('google', { session: false }),
+// 2) Google OAuth callback
+router.get(
+  "/google/callback",
+  passport.authenticate("google", { 
+    session: false, 
+    failureRedirect: ${process.env.FRONTEND_URL}/login?error=google_auth_failed 
+  }),
   (req, res) => {
-    const token = generateToken({ _id: req.user._id });
-    res.redirect(`${process.env.FRONTEND_URL}/oauth2/redirect?token=${token}`);
-  });
+    try {
+      console.log("=== GOOGLE OAUTH CALLBACK ===");
+      console.log("User authenticated:", !!req.user);
+      
+      if (!req.user || !req.user.token) {
+        console.error("No user or token in callback");
+        return res.redirect(${process.env.FRONTEND_URL}/login?error=authentication_failed);
+      }
+
+      const { token } = req.user;
+      console.log("Redirecting with token to:", ${process.env.FRONTEND_URL}/oauth2/redirect?token=${token});
+      
+      // Redirect to frontend with token
+      res.redirect(${process.env.FRONTEND_URL}/oauth2/redirect?token=${token});
+    } catch (error) {
+      console.error("Error in Google callback:", error);
+      res.redirect(${process.env.FRONTEND_URL}/login?error=callback_error);
+    }
+  }
+);
 
 // Optional: handle Google OAuth failure
 router.get("/google/failure", (req, res) => {
   console.log("Google OAuth failed");
-  res.redirect(`${process.env.FRONTEND_URL}/login?error=google_oauth_failed`);
+  res.redirect(${process.env.FRONTEND_URL}/login?error=google_oauth_failed);
 });
 
 // Test endpoint to verify Google user creation
