@@ -146,3 +146,4 @@ router.post("/verify-token", async (req, res) => {
     res.status(401).json({ error: "Invalid token" });
   }
 });
+module.exports = router;
