@@ -70,7 +70,17 @@ const CouponSchema = new mongoose.Schema({
   updatedAt: { 
     type: Date, 
     default: Date.now 
-  }
+  },
+  couponCode: { 
+    type: String, 
+    default: null },
+  originalAmount: { 
+    type: Number, 
+    required: true },
+  discountedAmount: { 
+    type: Number, 
+    required: true },
+
 });
 
 // Index for better query performance

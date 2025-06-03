@@ -6,6 +6,7 @@ const geoip = require("geoip-lite");
 const { v4: uuidv4 } = require("uuid");
 const SubscriptionPlan = require("../models/SubscriptionPlan");
 const Order = require("../models/Order");
+const Coupon = require("../models/Coupon"); // 🔥 Import updated Coupon model
 const { authenticate } = require("../middleware/authMiddleware");
 
 // Determine environment (sandbox or production)
@@ -14,11 +15,11 @@ const isProd = environment === "PRODUCTION";
 
 // Resolve Cashfree endpoints
 const baseUrl = isProd
-  ? "https://api.cashfree.com"
-  : "https://sandbox.cashfree.com";
+  ? "https://api.cashfree.com" 
+  : "https://sandbox.cashfree.com"; 
 const checkoutBaseUrl = isProd
-  ? "https://www.cashfree.com"
-  : "https://sandbox.cashfree.com";
+  ? "https://www.cashfree.com" 
+  : "https://sandbox.cashfree.com"; 
 
 // Resolve Cashfree credentials
 const clientId = isProd
@@ -52,10 +53,10 @@ router.get("/plans", async (req, res) => {
   }
 });
 
-// POST /subscribe - Create a Cashfree order for subscription
+// POST /subscribe - Create a Cashfree order with coupon support
 router.post("/subscribe", authenticate, async (req, res) => {
   try {
-    const { planId, phone } = req.body;
+    const { planId, phone, couponCode } = req.body; // 🔥 Receive couponCode from frontend
     const user = req.user;
 
     console.log("Subscription request:", { planId, phone, userId: user._id });
@@ -91,7 +92,24 @@ router.post("/subscribe", authenticate, async (req, res) => {
       console.log("Blocked: No price for currency:", country === "IN" ? "INR" : "USD");
       return res.status(400).json({ error: "Price not found for the selected currency" });
     }
-    const { amount, currency } = priceObj;
+    const originalAmount = priceObj.amount;
+    let finalAmount = originalAmount;
+    let appliedCoupon = null;
+
+    // Validate and apply coupon if provided
+    if (couponCode) {
+      const coupon = await Coupon.findOne({ code: couponCode });
+      if (!coupon) return res.status(400).json({ error: "Invalid coupon code" });
+
+      const validationResult = coupon.isValidCoupon(originalAmount, priceObj.currency, planId);
+      if (!validationResult.valid) {
+        return res.status(400).json({ error: validationResult.message });
+      }
+
+      const discount = coupon.calculateDiscount(originalAmount);
+      finalAmount = Math.max(originalAmount - discount, 0); // Prevent negative amounts
+      appliedCoupon = coupon;
+    }
 
     // Generate unique order ID
     const orderId = `order_${uuidv4()}`;
@@ -99,8 +117,8 @@ router.post("/subscribe", authenticate, async (req, res) => {
     // Cashfree order payload
     const orderData = {
       order_id: orderId,
-      order_amount: amount,
-      order_currency: currency,
+      order_amount: finalAmount, // 🔥 Use discounted amount
+      order_currency: priceObj.currency,
       customer_details: {
         customer_id: user._id.toString(),
         customer_email: user.email,
@@ -128,13 +146,23 @@ router.post("/subscribe", authenticate, async (req, res) => {
       throw new Error("Failed to create order");
     }
 
-    // Save order in database
+    // Save order with coupon details
     await Order.create({
       userId: user._id,
       planId: plan._id,
       orderId: cfRes.data.order_id,
       status: "pending",
+      couponCode: appliedCoupon?.code || null,
+      originalAmount,
+      discountedAmount: finalAmount,
     });
+
+    // Increment coupon usage if applied
+    if (appliedCoupon) {
+      await Coupon.findByIdAndUpdate(appliedCoupon._id, {
+        $inc: { usedCount: 1 },
+      });
+    }
 
     // Return payment_session_id to frontend
     res.json({ payment_session_id: cfRes.data.payment_session_id });
