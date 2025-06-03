@@ -97,6 +97,10 @@ app.use((req, res, next) => {
 });
 // app.use("/api/admin", require("./routes/adminRoutes"));
 // Mount routes
+
+const couponRoutes = require('./routes/coupon');
+app.use('/api/coupon', couponRoutes);
+
 const numberScraperRouter = require("./routes/NumberScraper");
 app.use("/api/numberScraper", numberScraperRouter);
 app.use("/api/auth", require("./routes/authRoutes"));
