@@ -69,7 +69,7 @@ passport.use(
         
         // Ensure username is unique
         while (await User.findOne({ username })) {
-          username = ${baseUsername}${counter};
+          username = `${baseUsername}${counter}`;
           counter++;
         }
 
