@@ -51,7 +51,7 @@ router.get(
   "/google/callback",
   passport.authenticate("google", { 
     session: false, 
-    failureRedirect: ${process.env.FRONTEND_URL}/login?error=google_auth_failed 
+    failureRedirect: `${process.env.FRONTEND_URL}/login?error=google_auth_failed `
   }),
   (req, res) => {
     try {
@@ -60,17 +60,17 @@ router.get(
       
       if (!req.user || !req.user.token) {
         console.error("No user or token in callback");
-        return res.redirect(${process.env.FRONTEND_URL}/login?error=authentication_failed);
+        return res.redirect(`${process.env.FRONTEND_URL}/login?error=authentication_failed`);
       }
 
       const { token } = req.user;
-      console.log("Redirecting with token to:", ${process.env.FRONTEND_URL}/oauth2/redirect?token=${token});
+      console.log("Redirecting with token to:",` ${process.env.FRONTEND_URL}/oauth2/redirect?token=${token}`);
       
       // Redirect to frontend with token
-      res.redirect(${process.env.FRONTEND_URL}/oauth2/redirect?token=${token});
+      res.redirect(`${process.env.FRONTEND_URL}/oauth2/redirect?token=${token}`);
     } catch (error) {
       console.error("Error in Google callback:", error);
-      res.redirect(${process.env.FRONTEND_URL}/login?error=callback_error);
+      res.redirect(`${process.env.FRONTEND_URL}/login?error=callback_error`);
     }
   }
 );
