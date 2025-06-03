@@ -26,13 +26,8 @@ const userSchema = new mongoose.Schema({
   // Google OAuth fields
   googleId: { 
     type: String, 
-    sparse: true,
+    sparse: true, // Allows null values but ensures uniqueness when present
     unique: true 
-  },
-  authProvider: {
-    type: String,
-    enum: ['local', 'google'],
-    default: 'local'
   },
   photo: { 
     type: String, 
@@ -45,7 +40,11 @@ const userSchema = new mongoose.Schema({
   subscriptionEndDate: { type: Date, default: null },
   
   // Add authentication provider tracking
- 
+  authProvider: {
+    type: String,
+    enum: ['local', 'google'],
+    default: 'local'
+  }
 }, {
   timestamps: true
 });
