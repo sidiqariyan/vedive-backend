@@ -2,6 +2,7 @@ const crypto = require('crypto');
 const bcrypt = require('bcryptjs');
 const jwt = require("jsonwebtoken");
 const User = require("../models/User");
+const { OAuth2Client } = require('google-auth-library');
 const { sendVerificationEmail, sendResetPasswordEmail } = require("../utils/sendEmailToken");
 require("dotenv").config();
 bcrypt.setRandomFallback(crypto.randomBytes);
@@ -18,50 +19,68 @@ const generateToken = (payload, expiresIn = "1h") => {
 exports.register = async (req, res) => {
   try {
     const { name, username, email, password } = req.body;
+
+    // Validate required fields
     if (!name || !username || !email || !password) {
       return res.status(400).json({ error: "All fields are required" });
     }
+
+    // Ensure the password is a string
     if (typeof password !== "string") {
+      console.error("Invalid password type:", password, typeof password);
       return res.status(400).json({ error: "Password must be a string" });
     }
+
+    // Check if user already exists
     const existingUser = await User.findOne({ $or: [{ email }, { username }] });
     if (existingUser) {
       return res.status(400).json({ error: "User with this email or username already exists" });
     }
+
+    // Generate salt explicitly and hash the password
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
+
+    // Create a new user
     const user = new User({
       name,
       username,
       email,
       password: hashedPassword,
     });
-    await user.save();
 
-    // Generate verification token for email verification
+    // Save the user to the database
+    await user.save();
+    console.log("User created with ID:", user._id);
+
+    // Generate verification token with 15-minute expiry
     const verificationToken = generateToken({ _id: user._id }, "15m");
-    const tokenExpires = Date.now() + 900000;
+    const tokenExpires = Date.now() + 900000; // 15 minutes
+    
     user.verificationToken = verificationToken;
     user.verificationTokenExpires = tokenExpires;
     await user.save();
 
-    // ✅ Generate authentication token for immediate login
-    const loginToken = generateToken({ _id: user._id }, "30d");
+    // Log detailed information for debugging
+    console.log("Verification token generated at:", new Date().toISOString());
+    console.log("Token expires at:", new Date(tokenExpires).toISOString());
+    console.log("User ID in token:", user._id.toString());
+    console.log("Token (first 20 chars):", verificationToken.substring(0, 20) + "...");
 
-    // Build verification URL
+    // Build the verification URL
     const verificationUrl = `${process.env.FRONTEND_URL}/verify-email?token=${verificationToken}`;
+    console.log("Verification URL:", verificationUrl);
+    
     await sendVerificationEmail(email, verificationUrl, name);
 
-    // ✅ Return authentication token in response
-    res.status(201).json({
-      message: "User registered successfully. Please check your email to verify your account.",
-      token: loginToken, // ✅ Authentication token for immediate login
-      user: {
-        _id: user._id,
-        name: user.name,
-        email: user.email,
-        isVerified: user.isVerified,
-        authProvider: "email"
+    // Respond with success message
+    res.status(201).json({ 
+      message: "User registered successfully. Please check your email to verify your account. The link will expire in 15 minutes.",
+      email: email,
+      // Remove this debug info in production
+      debug: {
+        userId: user._id,
+        tokenExpires: new Date(tokenExpires).toISOString()
       }
     });
   } catch (error) {
@@ -239,18 +258,32 @@ exports.verifyEmail = async (req, res) => {
 exports.login = async (req, res) => {
   try {
     const { emailOrUsername, password } = req.body;
+
+    // Find user by email or username
     const user = await User.findOne({
       $or: [{ email: emailOrUsername }, { username: emailOrUsername }],
     });
+
     if (!user) {
       return res.status(400).json({ error: "Invalid credentials" });
     }
+
+    // Check if password matches
     const isMatch = await bcrypt.compare(password, user.password);
     if (!isMatch) {
       return res.status(400).json({ error: "Invalid credentials" });
     }
 
-    // ✅ Remove email verification requirement for login
+    // Check if user is verified
+    if (!user.isVerified) {
+      return res.status(400).json({ 
+        error: "Please verify your email before logging in",
+        needsVerification: true,
+        email: user.email
+      });
+    }
+
+    // Generate JWT token with 30-day expiry
     const token = generateToken({ _id: user._id }, '30d');
     res.status(200).json({
       message: "Login successful",
@@ -258,9 +291,9 @@ exports.login = async (req, res) => {
       user: {
         _id: user._id,
         name: user.name,
+        username: user.username,
         email: user.email,
-        isVerified: user.isVerified
-      }
+      },
     });
   } catch (error) {
     console.error("Login Error:", error);
@@ -411,5 +444,164 @@ exports.updatePassword = async (req, res) => {
   } catch (error) {
     console.error("Error updating password:", error);
     res.status(500).json({ error: "Failed to update password" });
+  }
+};
+
+const client = new OAuth2Client(
+  process.env.GOOGLE_CLIENT_ID,
+  process.env.GOOGLE_CLIENT_SECRET,
+  `${process.env.BACKEND_URL}/api/auth/google/callback`
+);
+
+/**
+ * Generate Google OAuth URL
+ * @route GET /api/auth/google
+ */
+exports.googleAuth = (req, res) => {
+  const authorizeUrl = client.generateAuthUrl({
+    access_type: 'offline',
+    scope: ['profile', 'email'],
+    prompt: 'select_account'
+  });
+  
+  res.redirect(authorizeUrl);
+};
+
+/**
+ * Handle Google OAuth Callback
+ * @route GET /api/auth/google/callback
+ */
+exports.googleCallback = async (req, res) => {
+  try {
+    const { code } = req.query;
+    
+    if (!code) {
+      console.error('No authorization code received');
+      return res.redirect(`${process.env.FRONTEND_URL}/oauth2/redirect?error=no_code`);
+    }
+
+    // Exchange code for tokens
+    const { tokens } = await client.getToken(code);
+    client.setCredentials(tokens);
+
+    // Get user info from Google
+    const ticket = await client.verifyIdToken({
+      idToken: tokens.id_token,
+      audience: process.env.GOOGLE_CLIENT_ID
+    });
+    
+    const payload = ticket.getPayload();
+    console.log('Google user payload:', {
+      id: payload.sub,
+      email: payload.email,
+      name: payload.name,
+      picture: payload.picture
+    });
+
+    // Check if user exists
+    let user = await User.findOne({ 
+      $or: [
+        { googleId: payload.sub },
+        { email: payload.email.toLowerCase() }
+      ]
+    });
+
+    if (user) {
+      // Update existing user with Google ID if not set
+      if (!user.googleId) {
+        user.googleId = payload.sub;
+        user.photo = payload.picture;
+        user.isVerified = true;
+        if (user.authProvider === 'local') {
+          user.authProvider = 'google';
+        }
+        await user.save();
+      }
+    } else {
+      // Create new user
+      let baseUsername = payload.email.split('@')[0].replace(/[^a-zA-Z0-9_]/g, '');
+      if (baseUsername.length < 3) {
+        baseUsername = 'user' + baseUsername;
+      }
+      
+      let username = baseUsername;
+      let counter = 1;
+      
+      // Ensure username is unique
+      while (await User.findOne({ username })) {
+        username = `${baseUsername}${counter}`;
+        counter++;
+        if (counter > 1000) {
+          username = `${baseUsername}_${Date.now()}`;
+          break;
+        }
+      }
+
+      user = new User({
+        googleId: payload.sub,
+        name: payload.name,
+        email: payload.email.toLowerCase(),
+        username: username,
+        photo: payload.picture,
+        isVerified: true,
+        authProvider: 'google'
+      });
+
+      await user.save();
+    }
+
+    // Generate JWT token
+    const token = generateToken({ _id: user._id }, '30d');
+    
+    // Redirect to frontend with token
+    const redirectUrl = `${process.env.FRONTEND_URL}/oauth2/redirect?token=${encodeURIComponent(token)}`;
+    res.redirect(redirectUrl);
+    
+  } catch (error) {
+    console.error('Google OAuth Error:', error);
+    res.redirect(`${process.env.FRONTEND_URL}/oauth2/redirect?error=oauth_failed`);
+  }
+};
+
+/**
+ * Verify Token (for OAuth callback)
+ * @route POST /api/auth/verify-token
+ */
+exports.verifyToken = async (req, res) => {
+  try {
+    const { token } = req.body;
+    
+    if (!token) {
+      return res.status(400).json({ error: "Token is required" });
+    }
+
+    // Verify JWT token
+    const decoded = jwt.verify(token, process.env.JWT_SECRET);
+    
+    // Find user by ID
+    const user = await User.findById(decoded._id).select("-password");
+    
+    if (!user) {
+      return res.status(404).json({ error: "User not found" });
+    }
+
+    // Return user data
+    res.status(200).json({
+      message: "Token is valid",
+      user: user.toSafeObject()
+    });
+
+  } catch (error) {
+    console.error("Token verification error:", error);
+    
+    if (error.name === 'JsonWebTokenError') {
+      return res.status(401).json({ error: "Invalid token" });
+    }
+    
+    if (error.name === 'TokenExpiredError') {
+      return res.status(401).json({ error: "Token expired" });
+    }
+    
+    res.status(500).json({ error: "Token verification failed" });
   }
 };
