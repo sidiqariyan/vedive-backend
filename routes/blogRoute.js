@@ -6,6 +6,7 @@ const { v4: uuidv4 } = require("uuid");
 const BlogPost = require("../models/BlogPost");
 const { authenticate } = require("../middleware/authMiddleware");
 const { authorizeRoles } = require("../middleware/adminMiddleware");
+const Comment = require("../models/Comment");
 
 /** 
  * Configure multer for file uploads 
@@ -24,17 +25,12 @@ const upload = multer({
   }
 });
 
-// Serve uploaded images statically under:
-//    GET /api/blog/uploads/<...>
-// Because later we do `app.use('/api/blog', blogRouter)` in your server entrypoint.
+// Serve uploaded images statically
 router.use("/uploads", express.static(path.join(__dirname, "../public/uploads")));
-
-
 
 /**
  * @route POST /api/blog/upload-image
  * @desc  Uploads a single image (admin only) for use inside Draft.js editor
- *        Returns: { url: "/uploads/blog-images/<filename>" }
  */
 router.post(
   "/upload-image",
@@ -46,9 +42,6 @@ router.post(
       if (!req.file) {
         return res.status(400).json({ message: "No file received." });
       }
-      // Because `router.use('/uploads', express.static(...))` is mounted,
-      // the public URL to fetch this image is:
-      //    https://vedive.com:3000/api/blog/uploads/blog-images/<filename>
       const relativePath = `/uploads/blog-images/${req.file.filename}`;
       return res.status(200).json({ url: relativePath });
     } catch (err) {
@@ -59,7 +52,6 @@ router.post(
     }
   }
 );
-
 
 /**
  * @route POST /api/blog/create-blog-post
@@ -96,7 +88,6 @@ router.post(
     }
   }
 );
-
 
 /**
  * @route PUT /api/blog/update-blog-post/:id
@@ -137,7 +128,6 @@ router.put(
   }
 );
 
-
 /**
  * @route DELETE /api/blog/delete-blog-post/:id
  * @desc Delete a blog post (admin only)
@@ -158,32 +148,207 @@ router.delete(
   }
 );
 
-
 /**
  * @route GET /api/blog/blog-posts
- * @desc Public: List all published posts
+ * @desc Public: List all published posts with filtering, search, pagination, and sorting
  */
 router.get("/blog-posts", async (req, res) => {
   try {
-    const posts = await BlogPost.find({ status: "published" }).sort({ createdAt: -1 });
+    const { 
+      search, 
+      category, 
+      tag, 
+      page = 1, 
+      limit = 12, 
+      sort = 'newest' 
+    } = req.query;
+    
+    const query = { status: "published" };
+    
+    // Search functionality
+    if (search && search.trim()) {
+      query.$or = [
+        { title: { $regex: search.trim(), $options: "i" } },
+        { content: { $regex: search.trim(), $options: "i" } },
+        { authorName: { $regex: search.trim(), $options: "i" } }
+      ];
+    }
+    
+    // Category filter
+    if (category && category.trim()) {
+      query.category = { $regex: category.trim(), $options: "i" };
+    }
+    
+    // Tag filter
+    if (tag && tag.trim()) {
+      query.tags = { $in: [new RegExp(tag.trim(), "i")] };
+    }
+    
+    // Sorting options
+    let sortOption = { createdAt: -1 }; // default: newest first
+    switch (sort) {
+      case 'oldest':
+        sortOption = { createdAt: 1 };
+        break;
+      case 'popular':
+        sortOption = { views: -1, createdAt: -1 };
+        break;
+      case 'newest':
+      default:
+        sortOption = { createdAt: -1 };
+        break;
+    }
+    
+    // Pagination
+    const pageNum = parseInt(page);
+    const limitNum = parseInt(limit);
+    const skip = (pageNum - 1) * limitNum;
+    
+    // Get total count for pagination
+    const totalCount = await BlogPost.countDocuments(query);
+    const totalPages = Math.ceil(totalCount / limitNum);
+    
+    // Fetch posts
+    const posts = await BlogPost.find(query)
+      .sort(sortOption)
+      .skip(skip)
+      .limit(limitNum);
+    
+    // Format response
+    const formattedPosts = posts.map((post) => ({
+      id: post._id,
+      title: post.title,
+      slug: post.slug,
+      content: post.content,
+      coverImage: post.coverImage,
+      authorName: post.authorName,
+      category: post.category,
+      tags: post.tags || [],
+      readTime: post.readTime || `${Math.ceil(post.content.replace(/<[^>]*>/g, '').split(' ').length / 200)} min read`,
+      views: post.views || 0,
+      createdAt: post.createdAt,
+      updatedAt: post.updatedAt
+    }));
+    
+    // Pagination info
+    const pagination = {
+      currentPage: pageNum,
+      totalPages,
+      totalCount,
+      hasNextPage: pageNum < totalPages,
+      hasPrevPage: pageNum > 1,
+      limit: limitNum
+    };
+    
     res.json({
-      posts: posts.map((p) => ({
-        id: p._id,
-        title: p.title,
-        slug: p.slug,
-        content: p.content.substring(0, 200) + "...",
-        coverImage: p.coverImage,
-        authorName: p.authorName,
-        category: p.category,
-        readTime: p.readTime,
-        createdAt: p.createdAt
-      }))
+      posts: formattedPosts,
+      pagination
     });
+    
   } catch (err) {
-    res.status(500).json({ message: "Error fetching posts", error: err.message });
+    console.error("Error fetching blog posts:", err);
+    res.status(500).json({ 
+      message: "Error fetching posts", 
+      error: err.message 
+    });
   }
 });
 
+/**
+ * @route GET /api/blog/categories
+ * @desc Public: Get all categories with post counts
+ */
+router.get("/categories", async (req, res) => {
+  try {
+    const categories = await BlogPost.aggregate([
+      { $match: { status: "published" } },
+      { $group: { _id: "$category", count: { $sum: 1 } } },
+      { $sort: { count: -1 } }
+    ]);
+    
+    const formattedCategories = categories.map(cat => ({
+      name: cat._id,
+      count: cat.count
+    }));
+    
+    res.json({
+      categories: formattedCategories
+    });
+  } catch (err) {
+    console.error("Error fetching categories:", err);
+    res.status(500).json({ 
+      message: "Error fetching categories", 
+      error: err.message 
+    });
+  }
+});
+
+/**
+ * @route GET /api/blog/tags
+ * @desc Public: Get all tags with post counts
+ */
+router.get("/tags", async (req, res) => {
+  try {
+    const tags = await BlogPost.aggregate([
+      { $match: { status: "published" } },
+      { $unwind: "$tags" },
+      { $group: { _id: "$tags", count: { $sum: 1 } } },
+      { $sort: { count: -1 } },
+      { $limit: 50 } // Limit to top 50 tags
+    ]);
+    
+    const formattedTags = tags.map(tag => ({
+      name: tag._id,
+      count: tag.count
+    }));
+    
+    res.json({
+      tags: formattedTags
+    });
+  } catch (err) {
+    console.error("Error fetching tags:", err);
+    res.status(500).json({ 
+      message: "Error fetching tags", 
+      error: err.message 
+    });
+  }
+});
+
+/**
+ * @route POST /api/blog/comments
+ * @desc  Submit a new comment
+ */
+router.post("/comments", async (req, res) => {
+  try {
+    const { name, email, website, message, postSlug } = req.body;
+    if (!name || !email || !message || !postSlug) {
+      return res.status(400).json({ message: "Missing required fields" });
+    }
+    
+    const post = await BlogPost.findOne({ slug: postSlug, status: "published" });
+    if (!post) return res.status(404).json({ message: "Post not found" });
+
+    const newComment = new Comment({ name, email, website, message, postSlug });
+    await newComment.save();
+    res.status(201).json(newComment);
+  } catch (err) {
+    res.status(500).json({ message: "Error creating comment", error: err.message });
+  }
+});
+
+/**
+ * @route GET /api/blog/comments/:postSlug
+ * @desc  Get comments for a specific post
+ */
+router.get("/comments/:postSlug", async (req, res) => {
+  try {
+    const { postSlug } = req.params;
+    const comments = await Comment.find({ postSlug }).sort({ createdAt: -1 });
+    res.json(comments);
+  } catch (err) {
+    res.status(500).json({ message: "Error fetching comments", error: err.message });
+  }
+});
 
 /**
  * @route GET /api/blog/blog-posts/:identifier
@@ -193,13 +358,24 @@ router.get("/blog-posts/:identifier", async (req, res) => {
   try {
     const { identifier } = req.params;
     let post = await BlogPost.findOne({ slug: identifier, status: "published" });
-    if (!post) post = await BlogPost.findOne({ _id: identifier, status: "published" });
-    if (!post) return res.status(404).json({ message: "Not found" });
-    post.views++;
+    if (!post) {
+      post = await BlogPost.findOne({ _id: identifier, status: "published" });
+    }
+    if (!post) {
+      return res.status(404).json({ message: "Post not found" });
+    }
+    
+    // Increment view count
+    post.views = (post.views || 0) + 1;
     await post.save();
+    
     res.json(post);
   } catch (err) {
-    res.status(500).json({ message: "Error fetching post", error: err.message });
+    console.error("Error fetching post:", err);
+    res.status(500).json({ 
+      message: "Error fetching post", 
+      error: err.message 
+    });
   }
 });
 
