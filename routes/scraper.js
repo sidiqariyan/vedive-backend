@@ -14,23 +14,23 @@ const { generateCSV } = require("../utils/csvWriter");
 // Utility function for delay
 const delay = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-// Retry mechanism with exponential backoff
-const fetchWithRetry = async (url, retries = 3, delayMs = 2000) => {
+// Improved retry mechanism with longer delays for rate limiting
+const fetchWithRetry = async (url, retries = 3, delayMs = 5000) => {
   for (let i = 0; i < retries; i++) {
     try {
       return await axios.get(url, {
         headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
         },
-        timeout: 10000
+        timeout: 15000
       });
     } catch (error) {
       if (error.response?.status === 429 && i < retries - 1) {
         console.log(`Rate limit hit. Retrying in ${delayMs}ms...`);
         await delay(delayMs);
-        delayMs *= 2;
+        delayMs *= 2; // Exponential backoff
       } else if (i < retries - 1) {
-        console.log(`Request failed. Retrying in ${delayMs}ms...`);
+        console.log(`Request failed (${error.response?.status || error.code}). Retrying in ${delayMs}ms...`);
         await delay(delayMs);
         delayMs *= 1.5;
       } else {
@@ -77,9 +77,47 @@ const filterEmails = (candidates) =>
   candidates.filter((e) => !isExcludedEmail(e));
 
 /**
- * Scrape search results from priv.au
+ * Alternative scraping methods when priv.au is rate-limiting
  */
-async function scrapePrivAuResults(query, sites, pagesToScrape = 3) {
+async function scrapeWithAlternativeMethods(query, sites, pagesToScraper = 3) {
+  console.log("Using alternative scraping methods due to rate limiting...");
+  const emails = new Set();
+  const emailRegex = /\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b/g;
+  
+  // Method 1: Direct site search (if sites have search functionality)
+  for (const site of sites) {
+    try {
+      console.log(`Attempting direct search on ${site}...`);
+      
+      // For LinkedIn, try their search functionality
+      if (site.includes('linkedin.com')) {
+        const linkedinSearchUrl = `https://www.linkedin.com/search/results/all/?keywords=${encodeURIComponent(query)}`;
+        try {
+          const response = await fetchWithRetry(linkedinSearchUrl, 2, 8000);
+          const found = response.data.match(emailRegex) || [];
+          const filtered = filterEmails(found);
+          console.log(`→ Found ${filtered.length} emails from LinkedIn direct search`);
+          filtered.forEach(e => emails.add(e));
+        } catch (err) {
+          console.log(`LinkedIn direct search failed: ${err.message}`);
+        }
+      }
+      
+      // Add delay between site attempts
+      await delay(3000);
+      
+    } catch (error) {
+      console.error(`Error with alternative method for ${site}:`, error.message);
+    }
+  }
+  
+  return Array.from(emails);
+}
+
+/**
+ * Scrape search results from priv.au with improved rate limiting handling
+ */
+async function scrapePrivAuResults(query, sites, pagesToScrape = 2) {
   console.log("Starting priv.au search scraping...");
   const searchResults = [];
   
@@ -94,11 +132,15 @@ async function scrapePrivAuResults(query, sites, pagesToScrape = 3) {
         
         console.log(`Fetching page ${page}: ${searchUrl}`);
         
-        const response = await fetchWithRetry(searchUrl);
+        // Longer delay before each request to avoid rate limiting
+        if (page > 1 || searchResults.length > 0) {
+          await delay(8000); // 8 second delay between requests
+        }
+        
+        const response = await fetchWithRetry(searchUrl, 2, 10000);
         const html = response.data;
         
         // Extract search result links from priv.au HTML
-        // This regex looks for typical search result link patterns
         const linkRegex = /<a[^>]+href=["']([^"']+)["'][^>]*>/gi;
         const matches = [...html.matchAll(linkRegex)];
         
@@ -110,28 +152,35 @@ async function scrapePrivAuResults(query, sites, pagesToScrape = 3) {
                    !link.includes('priv.au') && 
                    link.includes(site);
           })
-          .slice(0, 10); // Limit to first 10 results per page
+          .slice(0, 5); // Reduce to 5 results per page to be more conservative
         
         console.log(`→ Found ${pageResults.length} results on page ${page}`);
         searchResults.push(...pageResults);
         
-        // Add delay between pages to be respectful
-        await delay(2000);
-        
       } catch (error) {
         console.error(`Error fetching page ${page} for site ${site}:`, error.message);
+        
+        // If we hit rate limiting, try alternative methods
+        if (error.response?.status === 429) {
+          console.log("Rate limiting detected, falling back to alternative methods...");
+          const altResults = await scrapeWithAlternativeMethods(query, [site], 1);
+          return altResults;
+        }
         break;
       }
     }
+    
+    // Longer delay between different sites
+    await delay(10000);
   }
   
   return [...new Set(searchResults)]; // Remove duplicates
 }
 
 /**
- * Main function to scrape emails using priv.au search
+ * Main function to scrape emails using priv.au search with fallbacks
  */
-async function scrapeEmails(query, sites, pagesToScrape = 3) {
+async function scrapeEmails(query, sites, pagesToScrape = 2) {
   console.log("Starting email scraping with priv.au...");
   const emails = new Set();
   const emailRegex = /\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b/g;
@@ -142,8 +191,16 @@ async function scrapeEmails(query, sites, pagesToScrape = 3) {
     const searchResults = await scrapePrivAuResults(query, sites, pagesToScrape);
     console.log(`Total unique URLs found: ${searchResults.length}`);
     
-    // Process each URL
-    for (const link of searchResults) {
+    // If no results from priv.au, try alternative methods
+    if (searchResults.length === 0) {
+      console.log("No results from priv.au, trying alternative methods...");
+      const altEmails = await scrapeWithAlternativeMethods(query, sites, pagesToScrape);
+      altEmails.forEach(e => emails.add(e));
+      return Array.from(emails);
+    }
+    
+    // Process each URL with longer delays
+    for (const link of searchResults.slice(0, 10)) { // Limit to 10 URLs total
       console.log(`Processing: ${link}`);
       
       // Check if this is a site that needs Puppeteer
@@ -152,11 +209,13 @@ async function scrapeEmails(query, sites, pagesToScrape = 3) {
         puppeteerLinks.push(link);
       } else {
         try {
-          // Try to scrape with axios first
+          // Longer delay between page visits
+          await delay(3000);
+          
           const response = await axios.get(link, { 
-            timeout: 8000,
+            timeout: 12000,
             headers: {
-              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+              'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36'
             }
           });
           
@@ -170,23 +229,27 @@ async function scrapeEmails(query, sites, pagesToScrape = 3) {
         } catch (err) {
           console.error(`  → Error visiting ${link}: ${err.message}`);
           // If axios fails, add to puppeteer queue as fallback
-          puppeteerLinks.push(link);
+          if (puppeteerLinks.length < 5) { // Limit puppeteer links
+            puppeteerLinks.push(link);
+          }
         }
       }
-      
-      // Add delay between requests to be respectful
-      await delay(1000);
     }
     
-    // Use Puppeteer for remaining links
+    // Use Puppeteer for remaining links (limited)
     if (puppeteerLinks.length > 0) {
       console.log(`Using Puppeteer for ${puppeteerLinks.length} remaining links...`);
-      const puppeteerEmails = await scrapeEmailsWithPuppeteer(puppeteerLinks);
+      const puppeteerEmails = await scrapeEmailsWithPuppeteer(puppeteerLinks.slice(0, 5));
       puppeteerEmails.forEach((e) => emails.add(e));
     }
     
   } catch (error) {
     console.error("Error in email scraping:", error);
+    
+    // Final fallback - try alternative methods
+    console.log("Attempting final fallback methods...");
+    const fallbackEmails = await scrapeWithAlternativeMethods(query, sites, 1);
+    fallbackEmails.forEach(e => emails.add(e));
   }
   
   console.log(`Total unique emails found: ${emails.size}`);
@@ -212,20 +275,20 @@ async function scrapeEmailsWithPuppeteer(links) {
     const page = await browser.newPage();
     
     // Set user agent and viewport
-    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36');
+    await page.setUserAgent('Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36');
     await page.setViewport({ width: 1366, height: 768 });
     
-    for (const link of links.slice(0, 20)) { // Limit to first 20 links for performance
+    for (const link of links.slice(0, 5)) { // Limit to first 5 links for performance
       try {
         console.log(`Puppeteer visiting: ${link}`);
         
         await page.goto(link, { 
           waitUntil: "domcontentloaded", 
-          timeout: 15000 
+          timeout: 20000 
         });
         
         // Wait a bit for dynamic content
-        await delay(2000);
+        await delay(3000);
         
         const content = await page.content();
         const found = content.match(/\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b/g) || [];
@@ -234,8 +297,8 @@ async function scrapeEmailsWithPuppeteer(links) {
         console.log(`  → Puppeteer found ${filtered.length} valid emails`);
         filtered.forEach((e) => emails.add(e));
         
-        // Add delay between pages
-        await delay(3000);
+        // Add longer delay between pages
+        await delay(5000);
         
       } catch (err) {
         console.error(`  → Puppeteer error on ${link}: ${err.message}`);
@@ -255,7 +318,7 @@ async function scrapeEmailsWithPuppeteer(links) {
 // Handler function for email scraper
 const handleEmailScraper = async (req, res) => {
   try {
-    const { query, pages = 3, domains, campaignName, userId } = req.body;
+    const { query, pages = 2, domains, campaignName, userId } = req.body;
 
     // Input validation
     if (!query || typeof query !== "string") {
@@ -264,8 +327,8 @@ const handleEmailScraper = async (req, res) => {
     if (!campaignName || typeof campaignName !== "string") {
       return res.status(400).json({ error: "Invalid or missing campaignName parameter" });
     }
-    if (pages && (typeof pages !== "number" || pages <= 0 || pages > 10)) {
-      return res.status(400).json({ error: "Pages must be a positive number between 1 and 10" });
+    if (pages && (typeof pages !== "number" || pages <= 0 || pages > 5)) {
+      return res.status(400).json({ error: "Pages must be a positive number between 1 and 5" });
     }
     if (domains && !Array.isArray(domains)) {
       return res.status(400).json({ error: "Domains must be an array" });
@@ -289,20 +352,17 @@ const handleEmailScraper = async (req, res) => {
     // Define sites to search from
     const sites = req.body.sites || ["instagram.com", "twitter.com", "linkedin.com"];
 
-    // Limit concurrent requests to avoid overwhelming the server
-    const limit = pLimit(2);
-
     console.log(`Starting email scraping for query: "${query}" with domains: ${domainQueries}`);
     
     // Create the full search query including domain filters
     const fullQuery = `${query} (${domainQueries})`;
     
-    // Scrape emails using priv.au
+    // Scrape emails using priv.au with improved handling
     const emails = await scrapeEmails(fullQuery, sites, pages);
 
     if (emails.length === 0) {
       return res.status(404).json({ 
-        message: "No emails found for this query. Try different keywords or parameters." 
+        message: "No emails found for this query. The service may be experiencing rate limiting. Try again later or use different keywords." 
       });
     }
 
@@ -368,7 +428,12 @@ const handleEmailScraper = async (req, res) => {
   }
 };
 
-// API endpoint to scrape emails WITHOUT authentication
+// FIXED: Match the frontend endpoint path
+router.post("/email-scraper", async (req, res) => {
+  return await handleEmailScraper(req, res);
+});
+
+// Keep the original endpoint as well for backward compatibility
 router.post("/scrape-emails", async (req, res) => {
   return await handleEmailScraper(req, res);
 });
