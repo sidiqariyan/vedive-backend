@@ -24,23 +24,19 @@ const fetchWithRetry = async (url, retries = 3, delayMs = 2000) => {
 // return true if this email should be excluded
 const isExcludedEmail = (email) => {
   const [local, domain] = email.toLowerCase().split("@");
-
   // 1) anything at google.com or googlegroups.com
   if (/(^|\.)google\.com$/.test(domain) || /(^|\.)googlegroups\.com$/.test(domain)) {
     return true;
   }
-
   // 2) anything containing literal angle‑brackets
   if (email.includes("<") || email.includes(">")) {
     return true;
   }
-
-  // 3) “malformed” local parts like 10.3617… or u003c… pattern
-  //    i.e. purely numeric‑dot or start with “u003c”
+  // 3) "malformed" local parts like 10.3617… or u003c… pattern
+  //    i.e. purely numeric‑dot or start with "u003c"
   if (/^(?:u003c|\d+\.\d+)/.test(local)) {
     return true;
   }
-
   return false;
 };
 
@@ -50,11 +46,11 @@ const filterEmails = (candidates) =>
 
 /**
  * Main function to scrape emails.
- * Returns only “normal” (non‑Google, non‑malformed) addresses.
+ * Returns array of objects with email and source URL.
  */
 async function scrapeEmails(query, sites, apiKey, cx, pagesToScrape = 5) {
   console.log("Starting email scraping...");
-  const emails = new Set();
+  const emailsWithSources = new Map(); // Use Map to avoid duplicates while keeping source info
   const emailRegex = /\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b/g;
   const puppeteerLinks = [];
 
@@ -75,6 +71,7 @@ async function scrapeEmails(query, sites, apiKey, cx, pagesToScrape = 5) {
       }
 
       console.log(`→ ${results.length} results on page ${i}`);
+
       for (const { link } of results) {
         if (site.includes("instagram.com")) {
           puppeteerLinks.push(link);
@@ -82,29 +79,45 @@ async function scrapeEmails(query, sites, apiKey, cx, pagesToScrape = 5) {
           try {
             const html = (await axios.get(link, { timeout: 5000 })).data;
             const found = html.match(emailRegex) || [];
-            filterEmails(found).forEach((e) => emails.add(e));
+            const validEmails = filterEmails(found);
+            
+            // Store each email with its source URL
+            validEmails.forEach((email) => {
+              if (!emailsWithSources.has(email)) {
+                emailsWithSources.set(email, link);
+              }
+            });
+            
+            console.log(`Found ${validEmails.length} valid emails on ${link}`);
           } catch (err) {
             console.error(`Error visiting ${link}: ${err.message}`);
           }
         }
       }
-
       await delay(1000);
     }
   }
 
   if (puppeteerLinks.length) {
     console.log("Using Puppeteer for restricted sites…");
-    const more = await scrapeEmailsWithPuppeteer(puppeteerLinks);
-    more.forEach((e) => emails.add(e));
+    const moreEmailsWithSources = await scrapeEmailsWithPuppeteer(puppeteerLinks);
+    moreEmailsWithSources.forEach(({ email, source }) => {
+      if (!emailsWithSources.has(email)) {
+        emailsWithSources.set(email, source);
+      }
+    });
   }
 
-  return Array.from(emails);
+  // Convert Map to array of objects
+  return Array.from(emailsWithSources.entries()).map(([email, source]) => ({
+    email,
+    source
+  }));
 }
 
 // Puppeteer fallback for sites like Instagram
 async function scrapeEmailsWithPuppeteer(links) {
-  const emails = new Set();
+  const emailsWithSources = [];
   const browser = await puppeteer.launch({
     headless: true,
     args: ["--no-sandbox", "--disable-setuid-sandbox"],
@@ -117,14 +130,21 @@ async function scrapeEmailsWithPuppeteer(links) {
       await page.goto(link, { waitUntil: "domcontentloaded", timeout: 10000 });
       const content = await page.content();
       const found = content.match(/\b[A-Za-z0-9._%+\-]+@[A-Za-z0-9.\-]+\.[A-Za-z]{2,}\b/g) || [];
-      filterEmails(found).forEach((e) => emails.add(e));
+      const validEmails = filterEmails(found);
+      
+      // Store each email with its source URL
+      validEmails.forEach((email) => {
+        emailsWithSources.push({ email, source: link });
+      });
+      
+      console.log(`Found ${validEmails.length} valid emails on ${link}`);
     } catch (err) {
       console.error(`Error on ${link}: ${err.message}`);
     }
   }
 
   await browser.close();
-  return Array.from(emails);
+  return emailsWithSources;
 }
 
 module.exports = { scrapeEmails };
