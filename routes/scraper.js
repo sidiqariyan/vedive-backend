@@ -82,20 +82,38 @@ const handleEmailScraper = async (req, res) => {
     );
 
     const emailResults = await Promise.all(emailPromises);
-    // Flatten and remove duplicates
-    const emails = [...new Set(emailResults.flat().filter(Boolean))];
+    
+    // Flatten results and handle duplicates while preserving source info
+    const emailMap = new Map();
+    emailResults.flat().forEach(item => {
+      if (item && item.email) {
+        // If email doesn't exist, add it. If it exists, keep the first source found
+        if (!emailMap.has(item.email)) {
+          emailMap.set(item.email, item.source);
+        }
+      }
+    });
 
-    if (emails.length === 0) {
+    // Convert back to array of objects
+    const emailsWithSources = Array.from(emailMap.entries()).map(([email, source]) => ({
+      email,
+      source
+    }));
+
+    if (emailsWithSources.length === 0) {
       return res.status(404).json({ message: "No emails found for this query. Try different keywords or parameters." });
     }
 
-    console.log(`Found ${emails.length} unique emails for query: "${query}"`);
+    console.log(`Found ${emailsWithSources.length} unique emails for query: "${query}"`);
 
     // Validate emails before saving
-    const validEmails = emails.filter(email => validator.isEmail(email));
-    if (validEmails.length === 0) {
+    const validEmailsWithSources = emailsWithSources.filter(item => validator.isEmail(item.email));
+    if (validEmailsWithSources.length === 0) {
       return res.status(404).json({ message: "No valid emails found for this query. Try different keywords or parameters." });
     }
+
+    // Extract just the email addresses for campaign storage (maintaining backward compatibility)
+    const validEmails = validEmailsWithSources.map(item => item.email);
 
     // Save the campaign
     if (userIdentifier && userIdentifier !== "anonymous") {
@@ -113,8 +131,8 @@ const handleEmailScraper = async (req, res) => {
       console.log("No userId provided, skipping campaign creation");
     }
 
-    // Generate CSV file with the valid emails
-    const csvPath = await generateCSV(validEmails);
+    // Generate CSV file with the valid emails and their sources
+    const csvPath = await generateCSV(validEmailsWithSources);
     if (!csvPath) {
       return res.status(500).json({ error: "Failed to generate CSV file" });
     }
