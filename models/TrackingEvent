@@ -1,319 +1,194 @@
-const mongoose = require("mongoose");
+const mongoose = require('mongoose');
 
-// Schema for storing additional metadata about tracking events
-const eventMetadataSchema = new mongoose.Schema({
-  userAgent: { type: String },
-  ipAddress: { type: String },
-  referer: { type: String },
-  deviceType: { type: String, enum: ["desktop", "mobile", "tablet", "unknown"], default: "unknown" },
-  browser: { type: String },
-  operatingSystem: { type: String },
-  location: {
-    country: { type: String },
-    region: { type: String },
-    city: { type: String },
-    timezone: { type: String }
-  }
-}, { _id: false });
-
-// Main tracking event schema
-const trackingEventSchema = new mongoose.Schema(
-  {
-    // Core identification fields
-    campaignId: { 
-      type: mongoose.Schema.Types.ObjectId, 
-      ref: "Campaign", 
-      required: true, 
-      index: true 
-    },
-    recipientEmail: { 
-      type: String, 
-      required: true, 
-      lowercase: true,
-      trim: true,
-      index: true
-    },
-    trackingToken: { 
-      type: String, 
-      required: true, 
-      index: true 
-    },
-
-    // Event details
-    eventType: { 
-      type: String, 
-      required: true, 
-      enum: [
-        "open", 
-        "click", 
-        "bounce", 
-        "unsubscribe", 
-        "spam_complaint",
-        "delivery",
-        "forward",
-        "reply"
-      ],
-      index: true 
-    },
-    timestamp: { 
-      type: Date, 
-      default: Date.now, 
-      required: true, 
-      index: true 
-    },
-
-    // Event-specific details
-    details: { 
-      type: String, // For click URLs, bounce reasons, etc.
-      default: "" 
-    },
-    
-    // Enhanced tracking metadata
-    metadata: eventMetadataSchema,
-
-    // Additional tracking fields
-    isUnique: { 
-      type: Boolean, 
-      default: true, // First occurrence of this event type for this recipient
-      index: true 
-    },
-    sessionId: { 
-      type: String, // To track user sessions
-      index: true 
-    },
-    
-    // Performance metrics
-    loadTime: { 
-      type: Number, // Time taken to load content (for opens)
-      min: 0 
-    },
-    clickPosition: {
-      x: { type: Number },
-      y: { type: Number }
-    },
-
-    // Email client detection
-    emailClient: {
-      name: { type: String },
-      version: { type: String },
-      type: { type: String, enum: ["webmail", "desktop", "mobile", "unknown"], default: "unknown" }
-    },
-
-    // Engagement scoring
-    engagementScore: { 
-      type: Number, 
-      min: 0, 
-      max: 100, 
-      default: 0 
-    },
-
-    // Campaign context
-    campaignName: { type: String }, // Denormalized for faster queries
-    userId: { 
-      type: mongoose.Schema.Types.ObjectId, 
-      ref: "User", 
-      index: true 
-    },
-
-    // Error handling
-    errorDetails: {
-      code: { type: String },
-      message: { type: String },
-      stack: { type: String }
-    },
-
-    // A/B testing support
-    variant: { 
-      type: String, 
-      default: "default" 
-    },
-
-    // Additional flags
-    flags: {
-      isBot: { type: Boolean, default: false },
-      isMobile: { type: Boolean, default: false },
-      isFirstTime: { type: Boolean, default: true },
-      isWorkingHours: { type: Boolean, default: false }
-    }
+const trackingEventSchema = new mongoose.Schema({
+  campaignId: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Campaign',
+    required: true,
+    index: true
   },
-  { 
-    timestamps: true,
-    // Add indexes for common query patterns
-    indexes: [
-      { campaignId: 1, eventType: 1, timestamp: -1 },
-      { recipientEmail: 1, eventType: 1, timestamp: -1 },
-      { campaignId: 1, recipientEmail: 1, eventType: 1 },
-      { userId: 1, timestamp: -1 },
-      { timestamp: -1 }, // For time-based queries
-      { campaignId: 1, isUnique: 1, eventType: 1 }, // For unique event counting
-      { "metadata.location.country": 1, eventType: 1 }, // For geographic analysis
-      { engagementScore: -1 }, // For engagement analysis
-      { flags: 1, eventType: 1 } // For filtering by flags
-    ]
+  recipientEmail: {
+    type: String,
+    required: true,
+    index: true
+  },
+  eventType: {
+    type: String,
+    required: true,
+    enum: ['open', 'click', 'bounce', 'unsubscribe', 'spam_complaint'],
+    index: true
+  },
+  timestamp: {
+    type: Date,
+    default: Date.now,
+    index: true
+  },
+  details: {
+    type: String,
+    default: null // For storing clicked URLs or other event-specific data
+  },
+  userAgent: {
+    type: String,
+    default: null
+  },
+  ipAddress: {
+    type: String,
+    default: null
+  },
+  location: {
+    country: String,
+    city: String,
+    region: String
+  },
+  device: {
+    type: String,
+    default: null // mobile, desktop, tablet
+  },
+  browser: {
+    type: String,
+    default: null
+  },
+  os: {
+    type: String,
+    default: null
   }
-);
+}, {
+  timestamps: true
+});
 
-// Compound indexes for complex queries
-trackingEventSchema.index({ campaignId: 1, eventType: 1, timestamp: -1 });
-trackingEventSchema.index({ recipientEmail: 1, eventType: 1, timestamp: -1 });
-trackingEventSchema.index({ campaignId: 1, recipientEmail: 1, eventType: 1 });
-trackingEventSchema.index({ userId: 1, timestamp: -1 });
-trackingEventSchema.index({ campaignId: 1, isUnique: 1, eventType: 1 });
+// Compound indexes for better query performance
+trackingEventSchema.index({ campaignId: 1, eventType: 1 });
+trackingEventSchema.index({ campaignId: 1, recipientEmail: 1 });
+trackingEventSchema.index({ campaignId: 1, timestamp: -1 });
+trackingEventSchema.index({ recipientEmail: 1, eventType: 1 });
 
-// Static methods for analytics
+// Virtual for getting readable timestamp
+trackingEventSchema.virtual('readableTimestamp').get(function() {
+  return this.timestamp.toLocaleDateString() + ' ' + this.timestamp.toLocaleTimeString();
+});
+
+// Static method to get analytics for a campaign
 trackingEventSchema.statics.getCampaignAnalytics = async function(campaignId) {
   const pipeline = [
     { $match: { campaignId: mongoose.Types.ObjectId(campaignId) } },
     {
       $group: {
-        _id: "$eventType",
+        _id: {
+          eventType: '$eventType',
+          recipientEmail: '$recipientEmail'
+        },
         count: { $sum: 1 },
-        uniqueCount: { $sum: { $cond: ["$isUnique", 1, 0] } },
-        recipients: { $addToSet: "$recipientEmail" }
+        firstEvent: { $min: '$timestamp' },
+        lastEvent: { $max: '$timestamp' }
+      }
+    },
+    {
+      $group: {
+        _id: '$_id.eventType',
+        uniqueRecipients: { $sum: 1 },
+        totalEvents: { $sum: '$count' },
+        events: {
+          $push: {
+            email: '$_id.recipientEmail',
+            count: '$count',
+            firstEvent: '$firstEvent',
+            lastEvent: '$lastEvent'
+          }
+        }
       }
     }
   ];
-  
+
   return await this.aggregate(pipeline);
 };
 
-trackingEventSchema.statics.getEngagementMetrics = async function(campaignId, timeframe = 24) {
-  const since = new Date(Date.now() - timeframe * 60 * 60 * 1000);
+// Static method to get time-based analytics
+trackingEventSchema.statics.getTimeBasedAnalytics = async function(campaignId, hours = 24) {
+  const startTime = new Date(Date.now() - hours * 60 * 60 * 1000);
   
-  return await this.aggregate([
-    { 
-      $match: { 
+  const pipeline = [
+    {
+      $match: {
         campaignId: mongoose.Types.ObjectId(campaignId),
-        timestamp: { $gte: since }
-      } 
+        timestamp: { $gte: startTime }
+      }
     },
     {
       $group: {
         _id: {
-          hour: { $hour: "$timestamp" },
-          eventType: "$eventType"
+          eventType: '$eventType',
+          hour: { $hour: '$timestamp' },
+          date: { $dateToString: { format: '%Y-%m-%d', date: '$timestamp' } }
         },
-        count: { $sum: 1 },
-        avgEngagementScore: { $avg: "$engagementScore" }
+        count: { $sum: 1 }
       }
     },
-    { $sort: { "_id.hour": 1 } }
-  ]);
+    {
+      $sort: { '_id.date': 1, '_id.hour': 1 }
+    }
+  ];
+
+  return await this.aggregate(pipeline);
 };
 
-trackingEventSchema.statics.getGeographicData = async function(campaignId) {
-  return await this.aggregate([
+// Static method to get recipient engagement summary
+trackingEventSchema.statics.getRecipientEngagement = async function(campaignId) {
+  const pipeline = [
     { $match: { campaignId: mongoose.Types.ObjectId(campaignId) } },
     {
       $group: {
-        _id: {
-          country: "$metadata.location.country",
-          eventType: "$eventType"
+        _id: '$recipientEmail',
+        events: {
+          $push: {
+            eventType: '$eventType',
+            timestamp: '$timestamp',
+            details: '$details'
+          }
         },
-        count: { $sum: 1 },
-        uniqueRecipients: { $addToSet: "$recipientEmail" }
+        totalEvents: { $sum: 1 },
+        hasOpened: {
+          $sum: {
+            $cond: [{ $eq: ['$eventType', 'open'] }, 1, 0]
+          }
+        },
+        hasClicked: {
+          $sum: {
+            $cond: [{ $eq: ['$eventType', 'click'] }, 1, 0]
+          }
+        },
+        openCount: {
+          $sum: {
+            $cond: [{ $eq: ['$eventType', 'open'] }, 1, 0]
+          }
+        },
+        clickCount: {
+          $sum: {
+            $cond: [{ $eq: ['$eventType', 'click'] }, 1, 0]
+          }
+        },
+        lastActivity: { $max: '$timestamp' }
       }
     },
     {
-      $group: {
-        _id: "$_id.country",
-        events: {
-          $push: {
-            eventType: "$_id.eventType",
-            count: "$count",
-            uniqueRecipients: { $size: "$uniqueRecipients" }
+      $addFields: {
+        engagementLevel: {
+          $switch: {
+            branches: [
+              { case: { $gt: ['$hasClicked', 0] }, then: 'high' },
+              { case: { $gt: ['$hasOpened', 0] }, then: 'medium' },
+              { case: { $eq: ['$totalEvents', 0] }, then: 'none' }
+            ],
+            default: 'low'
           }
-        },
-        totalEvents: { $sum: "$count" }
+        }
       }
     },
-    { $sort: { totalEvents: -1 } }
-  ]);
-};
-
-// Instance methods
-trackingEventSchema.methods.calculateEngagementScore = function() {
-  let score = 0;
-  
-  switch(this.eventType) {
-    case 'open':
-      score = 10;
-      break;
-    case 'click':
-      score = 25;
-      break;
-    case 'forward':
-      score = 40;
-      break;
-    case 'reply':
-      score = 50;
-      break;
-    case 'unsubscribe':
-      score = -10;
-      break;
-    case 'spam_complaint':
-      score = -25;
-      break;
-    case 'bounce':
-      score = -5;
-      break;
-    default:
-      score = 5;
-  }
-  
-  // Adjust for time factors
-  const hoursSinceEvent = (Date.now() - this.timestamp) / (1000 * 60 * 60);
-  if (hoursSinceEvent < 1) score *= 1.5; // Boost for immediate engagement
-  if (hoursSinceEvent < 24) score *= 1.2; // Boost for same-day engagement
-  
-  // Adjust for device type
-  if (this.flags.isMobile) score *= 1.1; // Mobile engagement is often more intentional
-  
-  this.engagementScore = Math.min(100, Math.max(0, score));
-  return this.engagementScore;
-};
-
-// Pre-save middleware
-trackingEventSchema.pre('save', async function(next) {
-  // Check if this is a unique event for this recipient and campaign
-  if (this.isNew) {
-    const existingEvent = await this.constructor.findOne({
-      campaignId: this.campaignId,
-      recipientEmail: this.recipientEmail,
-      eventType: this.eventType
-    });
-    
-    this.isUnique = !existingEvent;
-    
-    // Calculate engagement score
-    this.calculateEngagementScore();
-    
-    // Set working hours flag
-    const hour = this.timestamp.getHours();
-    this.flags.isWorkingHours = hour >= 9 && hour <= 17;
-    
-    // Detect if it's a bot (simple detection)
-    if (this.metadata.userAgent) {
-      const botPatterns = /bot|crawler|spider|scraper/i;
-      this.flags.isBot = botPatterns.test(this.metadata.userAgent);
+    {
+      $sort: { lastActivity: -1 }
     }
-  }
-  
-  next();
-});
+  ];
 
-// Virtual for getting local timestamp
-trackingEventSchema.virtual('localTimestamp').get(function() {
-  if (this.metadata.location && this.metadata.location.timezone) {
-    return this.timestamp.toLocaleString('en-US', { 
-      timeZone: this.metadata.location.timezone 
-    });
-  }
-  return this.timestamp;
-});
+  return await this.aggregate(pipeline);
+};
 
-// Ensure virtual fields are serialized
-trackingEventSchema.set('toJSON', { virtuals: true });
-trackingEventSchema.set('toObject', { virtuals: true });
-
-module.exports = mongoose.models.TrackingEvent || mongoose.model("TrackingEvent", trackingEventSchema);
+module.exports = mongoose.models.TrackingEvent || mongoose.model('TrackingEvent', trackingEventSchema);
