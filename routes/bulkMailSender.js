@@ -256,6 +256,42 @@ const readRecipientsFromFile = async (file) => {
   }
 };
 
+// Helper function to calculate detailed analytics
+const calculateCampaignAnalytics = async (campaignId, totalRecipients) => {
+  const openEvents = await TrackingEvent.find({
+    campaignId: campaignId,
+    eventType: 'open'
+  });
+
+  const clickEvents = await TrackingEvent.find({
+    campaignId: campaignId,
+    eventType: 'click'
+  });
+
+  const uniqueOpens = [...new Set(openEvents.map(event => event.recipientEmail))];
+  const uniqueClicks = [...new Set(clickEvents.map(event => event.recipientEmail))];
+
+  const openRate = totalRecipients > 0 ? (uniqueOpens.length / totalRecipients) * 100 : 0;
+  const clickRate = totalRecipients > 0 ? (uniqueClicks.length / totalRecipients) * 100 : 0;
+  const notOpenRate = 100 - openRate;
+  const clickThroughRate = uniqueOpens.length > 0 ? (uniqueClicks.length / uniqueOpens.length) * 100 : 0;
+
+  return {
+    totalRecipients,
+    uniqueOpens: uniqueOpens.length,
+    uniqueClicks: uniqueClicks.length,
+    totalOpens: openEvents.length,
+    totalClicks: clickEvents.length,
+    openRate: parseFloat(openRate.toFixed(2)),
+    clickRate: parseFloat(clickRate.toFixed(2)),
+    notOpenRate: parseFloat(notOpenRate.toFixed(2)),
+    clickThroughRate: parseFloat(clickThroughRate.toFixed(2)),
+    notClicked: totalRecipients - uniqueClicks.length,
+    notOpened: totalRecipients - uniqueOpens.length
+  };
+};
+
+// Send bulk mail endpoint (existing functionality)
 router.post(
   '/send-bulk-mail',
   authenticate,
@@ -305,7 +341,7 @@ router.post(
         console.warn('Warning: Potential spam keywords detected:', spamCheck.foundKeywords);
       }
 
-      const transporter = nodemailer.createTransport({
+      const transporter = nodemailer.createTransporter({
         host: smtpHost,
         port: parseInt(smtpPort),
         secure: smtpPort == 465,
@@ -403,18 +439,245 @@ router.post(
   }
 );
 
+// Get all campaigns with basic analytics
 router.get('/campaigns', authenticate, async (req, res) => {
   try {
     const campaigns = await Campaign.find({ userId: req.user._id })
       .select('-smtpPassword')
       .sort({ createdAt: -1 });
-    res.json(campaigns);
+
+    const campaignsWithAnalytics = await Promise.all(campaigns.map(async (campaign) => {
+      const analytics = await calculateCampaignAnalytics(campaign._id, campaign.recipients.length);
+      return {
+        ...campaign.toObject(),
+        analytics
+      };
+    }));
+
+    res.json(campaignsWithAnalytics);
   } catch (error) {
     console.error('Error fetching campaigns:', error);
     res.status(500).json({ error: 'Failed to fetch campaigns', details: error.message });
   }
 });
 
+// Get detailed analytics for a specific campaign
+router.get('/campaigns/:campaignId/analytics', authenticate, async (req, res) => {
+  try {
+    const { campaignId } = req.params;
+    
+    const campaign = await Campaign.findOne({ 
+      _id: campaignId, 
+      userId: req.user._id 
+    }).select('-smtpPassword');
+
+    if (!campaign) {
+      return res.status(404).json({ error: 'Campaign not found' });
+    }
+
+    const analytics = await calculateCampaignAnalytics(campaign._id, campaign.recipients.length);
+
+    // Get detailed recipient tracking data
+    const openEvents = await TrackingEvent.find({
+      campaignId: campaign._id,
+      eventType: 'open'
+    }).sort({ timestamp: -1 });
+
+    const clickEvents = await TrackingEvent.find({
+      campaignId: campaign._id,
+      eventType: 'click'
+    }).sort({ timestamp: -1 });
+
+    // Create recipient status mapping
+    const recipientStatus = campaign.recipients.map(recipient => {
+      const hasOpened = openEvents.some(event => event.recipientEmail === recipient.email);
+      const hasClicked = clickEvents.some(event => event.recipientEmail === recipient.email);
+      const openCount = openEvents.filter(event => event.recipientEmail === recipient.email).length;
+      const clickCount = clickEvents.filter(event => event.recipientEmail === recipient.email).length;
+
+      return {
+        email: recipient.email,
+        name: recipient.name,
+        status: hasClicked ? 'clicked' : hasOpened ? 'opened' : 'not_opened',
+        hasOpened,
+        hasClicked,
+        openCount,
+        clickCount,
+        lastOpened: hasOpened ? openEvents.find(e => e.recipientEmail === recipient.email)?.timestamp : null,
+        lastClicked: hasClicked ? clickEvents.find(e => e.recipientEmail === recipient.email)?.timestamp : null
+      };
+    });
+
+    // Group recipients by status
+    const groupedRecipients = {
+      opened: recipientStatus.filter(r => r.hasOpened && !r.hasClicked),
+      clicked: recipientStatus.filter(r => r.hasClicked),
+      not_opened: recipientStatus.filter(r => !r.hasOpened)
+    };
+
+    // Get click details with URLs
+    const clickDetails = clickEvents.map(event => ({
+      email: event.recipientEmail,
+      url: event.details,
+      timestamp: event.timestamp
+    }));
+
+    // Time-based analytics (hourly breakdown for last 24 hours)
+    const now = new Date();
+    const last24Hours = new Date(now.getTime() - 24 * 60 * 60 * 1000);
+    
+    const hourlyData = [];
+    for (let i = 0; i < 24; i++) {
+      const hourStart = new Date(last24Hours.getTime() + i * 60 * 60 * 1000);
+      const hourEnd = new Date(hourStart.getTime() + 60 * 60 * 1000);
+      
+      const hourlyOpens = openEvents.filter(event => 
+        event.timestamp >= hourStart && event.timestamp < hourEnd
+      ).length;
+      
+      const hourlyClicks = clickEvents.filter(event => 
+        event.timestamp >= hourStart && event.timestamp < hourEnd
+      ).length;
+      
+      hourlyData.push({
+        hour: hourStart.getHours(),
+        opens: hourlyOpens,
+        clicks: hourlyClicks,
+        timestamp: hourStart
+      });
+    }
+
+    res.json({
+      campaign: {
+        ...campaign.toObject(),
+        analytics
+      },
+      detailedAnalytics: {
+        ...analytics,
+        recipientStatus,
+        groupedRecipients,
+        clickDetails,
+        hourlyData,
+        recentActivity: {
+          recentOpens: openEvents.slice(0, 10),
+          recentClicks: clickEvents.slice(0, 10)
+        }
+      }
+    });
+  } catch (error) {
+    console.error('Error fetching campaign analytics:', error);
+    res.status(500).json({ error: 'Failed to fetch campaign analytics', details: error.message });
+  }
+});
+
+// Get analytics summary for dashboard
+router.get('/analytics/summary', authenticate, async (req, res) => {
+  try {
+    const campaigns = await Campaign.find({ userId: req.user._id });
+    
+    const totalCampaigns = campaigns.length;
+    const totalRecipients = campaigns.reduce((sum, campaign) => sum + campaign.recipients.length, 0);
+    
+    // Get all tracking events for user's campaigns
+    const campaignIds = campaigns.map(c => c._id);
+    const allOpenEvents = await TrackingEvent.find({
+      campaignId: { $in: campaignIds },
+      eventType: 'open'
+    });
+    const allClickEvents = await TrackingEvent.find({
+      campaignId: { $in: campaignIds },
+      eventType: 'click'
+    });
+
+    const totalUniqueOpens = [...new Set(allOpenEvents.map(e => e.recipientEmail))].length;
+    const totalUniqueClicks = [...new Set(allClickEvents.map(e => e.recipientEmail))].length;
+
+    const overallOpenRate = totalRecipients > 0 ? (totalUniqueOpens / totalRecipients) * 100 : 0;
+    const overallClickRate = totalRecipients > 0 ? (totalUniqueClicks / totalRecipients) * 100 : 0;
+    const overallNotOpenRate = 100 - overallOpenRate;
+
+    // Recent activity (last 7 days)
+    const sevenDaysAgo = new Date(Date.now() - 7 * 24 * 60 * 60 * 1000);
+    const recentCampaigns = campaigns.filter(c => c.createdAt >= sevenDaysAgo).length;
+    const recentOpenEvents = allOpenEvents.filter(e => e.timestamp >= sevenDaysAgo).length;
+    const recentClickEvents = allClickEvents.filter(e => e.timestamp >= sevenDaysAgo).length;
+
+    // Top performing campaigns
+    const campaignPerformance = await Promise.all(campaigns.map(async (campaign) => {
+      const analytics = await calculateCampaignAnalytics(campaign._id, campaign.recipients.length);
+      return {
+        campaignId: campaign._id,
+        campaignName: campaign.campaignName,
+        createdAt: campaign.createdAt,
+        ...analytics
+      };
+    }));
+
+    const topCampaignsByOpenRate = campaignPerformance
+      .sort((a, b) => b.openRate - a.openRate)
+      .slice(0, 5);
+
+    const topCampaignsByClickRate = campaignPerformance
+      .sort((a, b) => b.clickRate - a.clickRate)
+      .slice(0, 5);
+
+    res.json({
+      summary: {
+        totalCampaigns,
+        totalRecipients,
+        totalUniqueOpens,
+        totalUniqueClicks,
+        overallOpenRate: parseFloat(overallOpenRate.toFixed(2)),
+        overallClickRate: parseFloat(overallClickRate.toFixed(2)),
+        overallNotOpenRate: parseFloat(overallNotOpenRate.toFixed(2)),
+        totalOpensCount: allOpenEvents.length,
+        totalClicksCount: allClickEvents.length
+      },
+      recentActivity: {
+        recentCampaigns,
+        recentOpenEvents,
+        recentClickEvents,
+        last7Days: sevenDaysAgo
+      },
+      topPerformers: {
+        byOpenRate: topCampaignsByOpenRate,
+        byClickRate: topCampaignsByClickRate
+      },
+      allCampaignPerformance: campaignPerformance
+    });
+  } catch (error) {
+    console.error('Error fetching analytics summary:', error);
+    res.status(500).json({ error: 'Failed to fetch analytics summary', details: error.message });
+  }
+});
+
+// Get latest campaigns with enhanced analytics (updated existing endpoint)
+router.get('/latest-campaigns', authenticate, async (req, res) => {
+  try {
+    const campaigns = await Campaign.find({ userId: req.user._id })
+      .sort({ createdAt: -1 })
+      .limit(5)
+      .select('-smtpPassword');
+    
+    const campaignsWithStats = await Promise.all(campaigns.map(async (campaign) => {
+      const analytics = await calculateCampaignAnalytics(campaign._id, campaign.recipients.length);
+      return {
+        ...campaign.toObject(),
+        ...analytics,
+        openRatePercent: `${analytics.openRate}%`,
+        clickRatePercent: `${analytics.clickRate}%`,
+        notOpenRatePercent: `${analytics.notOpenRate}%`
+      };
+    }));
+    
+    res.json(campaignsWithStats);
+  } catch (error) {
+    console.error('Error fetching latest campaigns:', error);
+    res.status(500).json({ error: 'Failed to fetch latest campaigns', details: error.message });
+  }
+});
+
+// Tracking endpoints (existing functionality)
 router.get('/track/open', async (req, res) => {
   const token = req.query.token;
   if (!token) {
@@ -430,9 +693,13 @@ router.get('/track/open', async (req, res) => {
           campaignId: campaign._id,
           recipientEmail: recipient.email,
           eventType: 'open',
-          timestamp: new Date()
+          timestamp: new Date(),
+          userAgent: req.get('User-Agent'),
+          ipAddress: req.ip
         });
         await trackingEvent.save();
+        
+        // Return 1x1 transparent GIF
         res.set('Content-Type', 'image/gif');
         res.send(Buffer.from('R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==', 'base64'));
       } else {
@@ -464,7 +731,9 @@ router.get('/track/click', async (req, res) => {
           recipientEmail: recipient.email,
           eventType: 'click',
           timestamp: new Date(),
-          details: decodeURIComponent(url)
+          details: decodeURIComponent(url),
+          userAgent: req.get('User-Agent'),
+          ipAddress: req.ip
         });
         await trackingEvent.save();
         res.redirect(decodeURIComponent(url));
@@ -477,41 +746,6 @@ router.get('/track/click', async (req, res) => {
   } catch (error) {
     console.error('Error tracking click:', error);
     res.status(500).send('Server error');
-  }
-});
-
-router.get('/latest-campaigns', authenticate, async (req, res) => {
-  try {
-    const campaigns = await Campaign.find({ userId: req.user._id })
-      .sort({ createdAt: -1 })
-      .limit(5)
-      .select('-smtpPassword');
-    
-    const campaignsWithStats = await Promise.all(campaigns.map(async (campaign) => {
-      const openRecipients = await TrackingEvent.distinct('recipientEmail', {
-        campaignId: campaign._id,
-        eventType: 'open'
-      });
-      const clickRecipients = await TrackingEvent.distinct('recipientEmail', {
-        campaignId: campaign._id,
-        eventType: 'click'
-      });
-      const totalRecipients = campaign.recipients.length;
-      const openRate = totalRecipients > 0 ? (openRecipients.length / totalRecipients) * 100 : 0;
-      const clickRate = totalRecipients > 0 ? (clickRecipients.length / totalRecipients) * 100 : 0;
-      
-      return {
-        ...campaign.toObject(),
-        openRate: openRate.toFixed(2) + '%',
-        clickRate: clickRate.toFixed(2) + '%',
-        totalRecipients
-      };
-    }));
-    
-    res.json(campaignsWithStats);
-  } catch (error) {
-    console.error('Error fetching latest campaigns:', error);
-    res.status(500).json({ error: 'Failed to fetch latest campaigns', details: error.message });
   }
 });
 
