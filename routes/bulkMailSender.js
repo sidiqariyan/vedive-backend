@@ -26,6 +26,148 @@ const ANTI_SPAM_CONFIG = {
     'winner', 'congratulations', 'cash', 'money back', '$']
 }
 
+// Helper function to check for spam keywords
+const containsSpamKeywords = (subject, body) => {
+  const textToCheck = (subject + ' ' + body).toLowerCase();
+  const foundKeywords = ANTI_SPAM_CONFIG.SPAM_KEYWORDS.filter(keyword => 
+    textToCheck.includes(keyword.toLowerCase())
+  );
+  
+  return {
+    hasSpamKeywords: foundKeywords.length > 0,
+    foundKeywords: foundKeywords
+  };
+};
+
+// Helper function to generate anti-spam headers
+const getAntiSpamHeaders = (fromDomain, campaignId) => {
+  const messageId = `<${crypto.randomUUID()}@${fromDomain}>`;
+  
+  return {
+    'Message-ID': messageId,
+    'Date': new Date().toUTCString(),
+    'X-Mailer': 'Custom Bulk Mailer v1.0',
+    'X-Campaign-ID': campaignId.toString(),
+    'X-Auto-Response-Suppress': 'All',
+    'Precedence': 'bulk',
+    'List-Unsubscribe': `<mailto:unsubscribe@${fromDomain}?subject=Unsubscribe>`,
+    'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
+    'X-Report-Abuse': `abuse@${fromDomain}`,
+    'Return-Path': `noreply@${fromDomain}`,
+    'Sender': `noreply@${fromDomain}`,
+    'Organization': fromDomain,
+    'X-Priority': '3',
+    'X-MSMail-Priority': 'Normal',
+    'X-MimeOLE': 'Produced By Custom Bulk Mailer',
+    'MIME-Version': '1.0'
+  };
+};
+
+// Helper function to improve email content for better deliverability
+const improveEmailContent = (emailBody, recipientName, fromDomain, campaignId) => {
+  let improvedBody = emailBody;
+  
+  // Add personalization if name is available
+  if (recipientName) {
+    improvedBody = improvedBody.replace(/\{name\}/gi, recipientName);
+    improvedBody = improvedBody.replace(/\{first_name\}/gi, recipientName.split(' ')[0]);
+  }
+  
+  // Add unsubscribe link if not present
+  const unsubscribeLink = `<a href="mailto:unsubscribe@${fromDomain}?subject=Unsubscribe&body=Campaign ID: ${campaignId}">Unsubscribe</a>`;
+  
+  if (!improvedBody.toLowerCase().includes('unsubscribe')) {
+    improvedBody += `<br><br><small>If you no longer wish to receive these emails, ${unsubscribeLink}</small>`;
+  }
+  
+  // Add proper HTML structure if missing
+  if (!improvedBody.includes('<html>')) {
+    improvedBody = `
+      <!DOCTYPE html>
+      <html>
+      <head>
+        <meta charset="UTF-8">
+        <meta name="viewport" content="width=device-width, initial-scale=1.0">
+        <title>Email</title>
+      </head>
+      <body>
+        ${improvedBody}
+      </body>
+      </html>
+    `;
+  }
+  
+  return improvedBody;
+};
+
+// Helper function to send emails in batches with delays
+const sendEmailsInBatches = async (transporter, emailData, recipients, campaignId) => {
+  const results = {
+    sent: 0,
+    failed: 0,
+    errors: []
+  };
+  
+  const batchSize = ANTI_SPAM_CONFIG.MAX_BATCH_SIZE;
+  const totalBatches = Math.ceil(recipients.length / batchSize);
+  
+  console.log(`Sending ${recipients.length} emails in ${totalBatches} batches of ${batchSize}`);
+  
+  for (let i = 0; i < totalBatches; i++) {
+    const batchStart = i * batchSize;
+    const batchEnd = Math.min(batchStart + batchSize, recipients.length);
+    const batch = recipients.slice(batchStart, batchEnd);
+    
+    console.log(`Processing batch ${i + 1}/${totalBatches} (${batch.length} emails)`);
+    
+    // Send emails in current batch
+    for (const recipient of batch) {
+      try {
+        // Personalize email content
+        const personalizedBody = improveEmailContent(
+          emailData.html, 
+          recipient.name, 
+          emailData.headers['Organization'], 
+          campaignId
+        );
+        
+        // Create personalized email
+        const personalizedEmail = {
+          ...emailData,
+          to: recipient.email,
+          html: personalizedBody
+        };
+        
+        // Send email
+        await transporter.sendMail(personalizedEmail);
+        results.sent++;
+        
+        // Add delay between individual emails
+        if (ANTI_SPAM_CONFIG.DELAY_BETWEEN_EMAILS > 0) {
+          await new Promise(resolve => setTimeout(resolve, ANTI_SPAM_CONFIG.DELAY_BETWEEN_EMAILS));
+        }
+        
+      } catch (error) {
+        console.error(`Failed to send email to ${recipient.email}:`, error.message);
+        results.failed++;
+        results.errors.push({
+          email: recipient.email,
+          error: error.message
+        });
+      }
+    }
+    
+    // Add delay between batches (except for the last batch)
+    if (i < totalBatches - 1 && ANTI_SPAM_CONFIG.DELAY_BETWEEN_BATCHES > 0) {
+      console.log(`Waiting ${ANTI_SPAM_CONFIG.DELAY_BETWEEN_BATCHES}ms before next batch...`);
+      await new Promise(resolve => setTimeout(resolve, ANTI_SPAM_CONFIG.DELAY_BETWEEN_BATCHES));
+    }
+  }
+  
+  console.log(`Batch sending completed. Sent: ${results.sent}, Failed: ${results.failed}`);
+  return results;
+};
+
 // Helper function to validate file type
 const validateFileType = (file, allowedTypes) => {
   const fileExtension = path.extname(file.originalname).toLowerCase();
