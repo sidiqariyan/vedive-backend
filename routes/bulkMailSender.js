@@ -26,148 +26,6 @@ const ANTI_SPAM_CONFIG = {
     'winner', 'congratulations', 'cash', 'money back', '$']
 }
 
-// Helper function to check for spam keywords
-const containsSpamKeywords = (subject, body) => {
-  const textToCheck = (subject + ' ' + body).toLowerCase();
-  const foundKeywords = ANTI_SPAM_CONFIG.SPAM_KEYWORDS.filter(keyword => 
-    textToCheck.includes(keyword.toLowerCase())
-  );
-  
-  return {
-    hasSpamKeywords: foundKeywords.length > 0,
-    foundKeywords: foundKeywords
-  };
-};
-
-// Helper function to generate anti-spam headers
-const getAntiSpamHeaders = (fromDomain, campaignId) => {
-  const messageId = `<${crypto.randomUUID()}@${fromDomain}>`;
-  
-  return {
-    'Message-ID': messageId,
-    'Date': new Date().toUTCString(),
-    'X-Mailer': 'Custom Bulk Mailer v1.0',
-    'X-Campaign-ID': campaignId.toString(),
-    'X-Auto-Response-Suppress': 'All',
-    'Precedence': 'bulk',
-    'List-Unsubscribe': `<mailto:unsubscribe@${fromDomain}?subject=Unsubscribe>`,
-    'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
-    'X-Report-Abuse': `abuse@${fromDomain}`,
-    'Return-Path': `noreply@${fromDomain}`,
-    'Sender': `noreply@${fromDomain}`,
-    'Organization': fromDomain,
-    'X-Priority': '3',
-    'X-MSMail-Priority': 'Normal',
-    'X-MimeOLE': 'Produced By Custom Bulk Mailer',
-    'MIME-Version': '1.0'
-  };
-};
-
-// Helper function to improve email content for better deliverability
-const improveEmailContent = (emailBody, recipientName, fromDomain, campaignId) => {
-  let improvedBody = emailBody;
-  
-  // Add personalization if name is available
-  if (recipientName) {
-    improvedBody = improvedBody.replace(/\{name\}/gi, recipientName);
-    improvedBody = improvedBody.replace(/\{first_name\}/gi, recipientName.split(' ')[0]);
-  }
-  
-  // Add unsubscribe link if not present
-  const unsubscribeLink = `<a href="mailto:unsubscribe@${fromDomain}?subject=Unsubscribe&body=Campaign ID: ${campaignId}">Unsubscribe</a>`;
-  
-  if (!improvedBody.toLowerCase().includes('unsubscribe')) {
-    improvedBody += `<br><br><small>If you no longer wish to receive these emails, ${unsubscribeLink}</small>`;
-  }
-  
-  // Add proper HTML structure if missing
-  if (!improvedBody.includes('<html>')) {
-    improvedBody = `
-      <!DOCTYPE html>
-      <html>
-      <head>
-        <meta charset="UTF-8">
-        <meta name="viewport" content="width=device-width, initial-scale=1.0">
-        <title>Email</title>
-      </head>
-      <body>
-        ${improvedBody}
-      </body>
-      </html>
-    `;
-  }
-  
-  return improvedBody;
-};
-
-// Helper function to send emails in batches with delays
-const sendEmailsInBatches = async (transporter, emailData, recipients, campaignId) => {
-  const results = {
-    sent: 0,
-    failed: 0,
-    errors: []
-  };
-  
-  const batchSize = ANTI_SPAM_CONFIG.MAX_BATCH_SIZE;
-  const totalBatches = Math.ceil(recipients.length / batchSize);
-  
-  console.log(`Sending ${recipients.length} emails in ${totalBatches} batches of ${batchSize}`);
-  
-  for (let i = 0; i < totalBatches; i++) {
-    const batchStart = i * batchSize;
-    const batchEnd = Math.min(batchStart + batchSize, recipients.length);
-    const batch = recipients.slice(batchStart, batchEnd);
-    
-    console.log(`Processing batch ${i + 1}/${totalBatches} (${batch.length} emails)`);
-    
-    // Send emails in current batch
-    for (const recipient of batch) {
-      try {
-        // Personalize email content
-        const personalizedBody = improveEmailContent(
-          emailData.html, 
-          recipient.name, 
-          emailData.headers['Organization'], 
-          campaignId
-        );
-        
-        // Create personalized email
-        const personalizedEmail = {
-          ...emailData,
-          to: recipient.email,
-          html: personalizedBody
-        };
-        
-        // Send email
-        await transporter.sendMail(personalizedEmail);
-        results.sent++;
-        
-        // Add delay between individual emails
-        if (ANTI_SPAM_CONFIG.DELAY_BETWEEN_EMAILS > 0) {
-          await new Promise(resolve => setTimeout(resolve, ANTI_SPAM_CONFIG.DELAY_BETWEEN_EMAILS));
-        }
-        
-      } catch (error) {
-        console.error(`Failed to send email to ${recipient.email}:`, error.message);
-        results.failed++;
-        results.errors.push({
-          email: recipient.email,
-          error: error.message
-        });
-      }
-    }
-    
-    // Add delay between batches (except for the last batch)
-    if (i < totalBatches - 1 && ANTI_SPAM_CONFIG.DELAY_BETWEEN_BATCHES > 0) {
-      console.log(`Waiting ${ANTI_SPAM_CONFIG.DELAY_BETWEEN_BATCHES}ms before next batch...`);
-      await new Promise(resolve => setTimeout(resolve, ANTI_SPAM_CONFIG.DELAY_BETWEEN_BATCHES));
-    }
-  }
-  
-  console.log(`Batch sending completed. Sent: ${results.sent}, Failed: ${results.failed}`);
-  return results;
-};
-
 // Helper function to validate file type
 const validateFileType = (file, allowedTypes) => {
   const fileExtension = path.extname(file.originalname).toLowerCase();
@@ -348,32 +206,31 @@ router.post(
         // });
       }
 
-      // Configure Nodemailer transporter with FIXED anti-spam settings
-      // ✅ Correct usage
-// ✅ Correct usage
-const transporter = nodemailer.createTransport({
-  host: smtpHost,
-  port: parseInt(smtpPort),
-  secure: smtpPort == 465,
-  auth: {
-    user: smtpUsername,
-    pass: smtpPassword,
-  },
-  pool: true,
-  maxConnections: 5,
-  maxMessages: 100,
-  rateDelta: 1000,
-  rateLimit: 5,
-  tls: {
-    rejectUnauthorized: false,
-    ciphers: 'SSLv3'
-  }
-});
-
-
-        // FIXED: Remove DKIM configuration that was causing the error
-        // The error was caused by DKIM trying to process an undefined domain
-        // We'll handle email authentication through proper headers instead
+      // Configure Nodemailer transporter with anti-spam settings
+      const transporter = nodemailer.createTransporter({
+        host: smtpHost,
+        port: parseInt(smtpPort),
+        secure: smtpPort == 465, // Use secure connection for port 465
+        auth: {
+          user: smtpUsername,
+          pass: smtpPassword,
+        },
+        // Additional anti-spam configurations
+        pool: true, // Use connection pooling
+        maxConnections: 5, // Limit concurrent connections
+        maxMessages: 100, // Limit messages per connection
+        rateDelta: 1000, // Rate limiting: 1 second
+        rateLimit: 5, // Rate limiting: 5 emails per rateDelta
+        tls: {
+          rejectUnauthorized: false, // Accept self-signed certificates
+          ciphers: 'SSLv3'
+        },
+        dkim: {
+          // You can add DKIM signing here if you have keys
+          // domainName: fromDomain,
+          // keySelector: 'default',
+          // privateKey: 'your-private-key'
+        }
       });
 
       // Extract emails for database storage
@@ -399,11 +256,8 @@ const transporter = nodemailer.createTransport({
       await newCampaign.save();
       console.log('New campaign saved:', newCampaign);
 
-      // FIXED: Construct the "from" field properly
-      // Use the actual email address as the sender, with display name if provided
-      const fromField = fromEmail.includes('@') 
-        ? fromEmail // If fromEmail is already an email address, use it directly
-        : `"${fromEmail}" <${smtpUsername}>`; // Otherwise, use it as display name with SMTP username
+      // Construct the "from" field with display name (more professional)
+      const fromField = `"${fromEmail}" <${smtpUsername}>`;
       
       // Get anti-spam headers
       const antiSpamHeaders = getAntiSpamHeaders(fromDomain, newCampaign._id);
@@ -429,16 +283,16 @@ const transporter = nodemailer.createTransport({
       // Improve email content for better deliverability
       const improvedEmailBody = improveEmailContent(emailBody, null, fromDomain, newCampaign._id);
 
-      // FIXED: Prepare email data with proper envelope configuration
+      // Prepare email data with anti-spam headers
       const emailData = {
         from: fromField,
         subject: emailSubject,
         html: improvedEmailBody,
         headers: antiSpamHeaders,
-        // FIXED: Simplified envelope configuration
+        // Additional options for better deliverability
         envelope: {
-          from: smtpUsername, // Use SMTP username as envelope sender
-          // to will be set individually for each recipient
+          from: smtpUsername,
+          to: validRecipients.map(r => r.email)
         },
         messageId: antiSpamHeaders['Message-ID'],
         date: new Date(),
