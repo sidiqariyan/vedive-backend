@@ -687,73 +687,126 @@ router.get('/latest-campaigns', authenticate, async (req, res) => {
 // Tracking endpoints (existing functionality)
 router.get('/track/open', async (req, res) => {
   const token = req.query.token;
+  
+  // FIX: Better validation and error handling
   if (!token) {
-    return res.status(400).send('Missing token');
+    console.log('Tracking open: Missing token');
+    // Still return tracking pixel even if no token
+    res.set('Content-Type', 'image/gif');
+    return res.send(Buffer.from('R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==', 'base64'));
   }
   
   try {
+    console.log('Tracking open for token:', token); // DEBUG
+    
     const campaign = await Campaign.findOne({ 'recipients.trackingToken': token });
-    if (campaign) {
-      const recipient = campaign.recipients.find(r => r.trackingToken === token);
-      if (recipient) {
-        const trackingEvent = new TrackingEvent({
-          campaignId: campaign._id,
-          recipientEmail: recipient.email,
-          eventType: 'open',
-          timestamp: new Date(),
-          userAgent: req.get('User-Agent'),
-          ipAddress: req.ip
-        });
-        await trackingEvent.save();
-        
-        // Return 1x1 transparent GIF
-        res.set('Content-Type', 'image/gif');
-        res.send(Buffer.from('R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==', 'base64'));
-      } else {
-        res.status(404).send('Recipient not found');
-      }
-    } else {
-      res.status(404).send('Campaign not found');
+    if (!campaign) {
+      console.log('Campaign not found for token:', token); // DEBUG
+      res.set('Content-Type', 'image/gif');
+      return res.send(Buffer.from('R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==', 'base64'));
     }
+    
+    const recipient = campaign.recipients.find(r => r.trackingToken === token);
+    if (!recipient) {
+      console.log('Recipient not found for token:', token); // DEBUG
+      res.set('Content-Type', 'image/gif');
+      return res.send(Buffer.from('R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==', 'base64'));
+    }
+    
+    console.log('Creating tracking event for:', recipient.email); // DEBUG
+    
+    const trackingEvent = new TrackingEvent({
+      campaignId: campaign._id,
+      recipientEmail: recipient.email,
+      trackingToken: token, // FIX: Add trackingToken field
+      eventType: 'open',
+      timestamp: new Date(),
+      // FIX: Add metadata object structure
+      metadata: {
+        userAgent: req.get('User-Agent'),
+        ipAddress: req.ip || req.connection.remoteAddress
+      },
+      campaignName: campaign.campaignName, // FIX: Add denormalized data
+      userId: campaign.userId
+    });
+    
+    await trackingEvent.save();
+    console.log('Tracking event saved successfully'); // DEBUG
+    
+    // Return 1x1 transparent GIF
+    res.set({
+      'Content-Type': 'image/gif',
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      'Pragma': 'no-cache',
+      'Expires': '0'
+    });
+    res.send(Buffer.from('R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==', 'base64'));
+    
   } catch (error) {
     console.error('Error tracking open:', error);
-    res.status(500).send('Server error');
+    // Always return tracking pixel
+    res.set('Content-Type', 'image/gif');
+    res.send(Buffer.from('R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==', 'base64'));
   }
 });
 
 router.get('/track/click', async (req, res) => {
   const token = req.query.token;
   const url = req.query.url;
-  if (!token || !url) {
-    return res.status(400).send('Missing token or url');
+  
+  // FIX: Better validation
+  if (!token) {
+    console.log('Tracking click: Missing token');
+    return res.status(400).send('Missing token');
+  }
+  
+  if (!url) {
+    console.log('Tracking click: Missing URL');
+    return res.status(400).send('Missing url');
   }
   
   try {
+    console.log('Tracking click for token:', token, 'URL:', url); // DEBUG
+    
     const campaign = await Campaign.findOne({ 'recipients.trackingToken': token });
-    if (campaign) {
-      const recipient = campaign.recipients.find(r => r.trackingToken === token);
-      if (recipient) {
-        const trackingEvent = new TrackingEvent({
-          campaignId: campaign._id,
-          recipientEmail: recipient.email,
-          eventType: 'click',
-          timestamp: new Date(),
-          details: decodeURIComponent(url),
-          userAgent: req.get('User-Agent'),
-          ipAddress: req.ip
-        });
-        await trackingEvent.save();
-        res.redirect(decodeURIComponent(url));
-      } else {
-        res.status(404).send('Recipient not found');
-      }
-    } else {
-      res.status(404).send('Campaign not found');
+    if (!campaign) {
+      console.log('Campaign not found for token:', token); // DEBUG
+      return res.redirect(decodeURIComponent(url));
     }
+    
+    const recipient = campaign.recipients.find(r => r.trackingToken === token);
+    if (!recipient) {
+      console.log('Recipient not found for token:', token); // DEBUG
+      return res.redirect(decodeURIComponent(url));
+    }
+    
+    console.log('Creating click tracking event for:', recipient.email); // DEBUG
+    
+    const trackingEvent = new TrackingEvent({
+      campaignId: campaign._id,
+      recipientEmail: recipient.email,
+      trackingToken: token, // FIX: Add trackingToken field
+      eventType: 'click',
+      timestamp: new Date(),
+      details: decodeURIComponent(url),
+      // FIX: Add metadata object structure
+      metadata: {
+        userAgent: req.get('User-Agent'),
+        ipAddress: req.ip || req.connection.remoteAddress
+      },
+      campaignName: campaign.campaignName, // FIX: Add denormalized data
+      userId: campaign.userId
+    });
+    
+    await trackingEvent.save();
+    console.log('Click tracking event saved successfully'); // DEBUG
+    
+    res.redirect(decodeURIComponent(url));
+    
   } catch (error) {
     console.error('Error tracking click:', error);
-    res.status(500).send('Server error');
+    // Still redirect to the original URL
+    res.redirect(decodeURIComponent(url));
   }
 });
-
 module.exports = router;
