@@ -350,6 +350,7 @@ router.post(
 
       // Configure Nodemailer transporter with FIXED anti-spam settings
       // ✅ Correct usage
+// ✅ Correct usage
 const transporter = nodemailer.createTransport({
   host: smtpHost,
   port: parseInt(smtpPort),
@@ -368,6 +369,7 @@ const transporter = nodemailer.createTransport({
     ciphers: 'SSLv3'
   }
 });
+
 
         // FIXED: Remove DKIM configuration that was causing the error
         // The error was caused by DKIM trying to process an undefined domain
