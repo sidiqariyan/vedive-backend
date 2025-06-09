@@ -7,19 +7,19 @@ const mongoose = require('mongoose');
 const csv = require('csv-parser');
 const xlsx = require('xlsx');
 const crypto = require('crypto');
-const Campaign = require('../models/Campaign'); // Import the Campaign model
-const { authenticate } = require('../middleware/authMiddleware'); // Import authentication middleware
+const cheerio = require('cheerio');
+const Campaign = require('../models/Campaign');
+const TrackingEvent = require('../models/TrackingEvent');
+const { authenticate } = require('../middleware/authMiddleware');
 const router = express.Router();
 
-// Multer setup for file uploads
 const upload = multer({ dest: 'uploads/' });
 
-// Anti-spam configuration and helpers
 const ANTI_SPAM_CONFIG = {
-  MAX_BATCH_SIZE: 50, // Send emails in smaller batches
-  DELAY_BETWEEN_BATCHES: 2000, // 2 seconds delay between batches
-  DELAY_BETWEEN_EMAILS: 100, // 100ms delay between individual emails
-  MAX_EMAILS_PER_HOUR: 500, // Rate limiting
+  MAX_BATCH_SIZE: 50,
+  DELAY_BETWEEN_BATCHES: 2000,
+  DELAY_BETWEEN_EMAILS: 100,
+  MAX_EMAILS_PER_HOUR: 500,
   SPAM_KEYWORDS: [
     'free', 'urgent', 'limited time', 'act now', 'click here',
     'guaranteed', 'no obligation', 'risk free', 'special promotion',
@@ -29,24 +29,20 @@ const ANTI_SPAM_CONFIG = {
   ]
 };
 
-// Helper function to check for spam keywords
 const containsSpamKeywords = (subject, body) => {
   const text = `${subject} ${body}`.toLowerCase();
   const foundKeywords = ANTI_SPAM_CONFIG.SPAM_KEYWORDS.filter(keyword => 
     text.includes(keyword.toLowerCase())
   );
-  
   return {
     hasSpamKeywords: foundKeywords.length > 0,
     foundKeywords: foundKeywords
   };
 };
 
-// Helper function to generate anti-spam headers
 const getAntiSpamHeaders = (domain, campaignId) => {
   const messageId = `<${crypto.randomUUID()}@${domain}>`;
   const listId = `<campaign-${campaignId}@${domain}>`;
-  
   return {
     'Message-ID': messageId,
     'List-ID': listId,
@@ -64,25 +60,20 @@ const getAntiSpamHeaders = (domain, campaignId) => {
   };
 };
 
-// Helper function to improve email content for better deliverability
-const improveEmailContent = (emailBody, recipientName, domain, campaignId) => {
+const improveEmailContent = (emailBody, recipientName, domain, campaignId, trackingToken) => {
   let improvedBody = emailBody;
   
-  // Add personalization if name is provided
   if (recipientName) {
     improvedBody = improvedBody.replace(/\{name\}/gi, recipientName);
     improvedBody = improvedBody.replace(/\{first_name\}/gi, recipientName.split(' ')[0]);
   }
   
-  // Add unsubscribe link if not present
   const unsubscribeLink = `<p style="font-size: 12px; color: #666; margin-top: 20px; border-top: 1px solid #eee; padding-top: 10px;">
     If you no longer wish to receive these emails, you can 
     <a href="mailto:unsubscribe-${campaignId}@${domain}?subject=Unsubscribe" style="color: #666;">unsubscribe here</a>.
   </p>`;
   
-  // Check if unsubscribe link already exists
   if (!improvedBody.toLowerCase().includes('unsubscribe')) {
-    // Try to add before closing body tag, otherwise append
     if (improvedBody.toLowerCase().includes('</body>')) {
       improvedBody = improvedBody.replace('</body>', `${unsubscribeLink}</body>`);
     } else {
@@ -90,7 +81,20 @@ const improveEmailContent = (emailBody, recipientName, domain, campaignId) => {
     }
   }
   
-  // Add proper HTML structure if missing
+  if (trackingToken) {
+    const $ = cheerio.load(improvedBody);
+    $('a').each(function() {
+      const originalUrl = $(this).attr('href');
+      if (originalUrl) {
+        const trackingUrl = `${process.env.BASE_URL}/track/click?token=${trackingToken}&url=${encodeURIComponent(originalUrl)}`;
+        $(this).attr('href', trackingUrl);
+      }
+    });
+    const trackingPixel = `<img src="${process.env.BASE_URL}/track/open?token=${trackingToken}" width="1" height="1" alt="" />`;
+    $('body').append(trackingPixel);
+    improvedBody = $.html();
+  }
+  
   if (!improvedBody.toLowerCase().includes('<html>')) {
     improvedBody = `<!DOCTYPE html>
 <html lang="en">
@@ -108,7 +112,6 @@ const improveEmailContent = (emailBody, recipientName, domain, campaignId) => {
   return improvedBody;
 };
 
-// Helper function to send emails in batches
 const sendEmailsInBatches = async (transporter, emailData, recipients, campaignId) => {
   const results = {
     sent: 0,
@@ -121,20 +124,16 @@ const sendEmailsInBatches = async (transporter, emailData, recipients, campaignI
     batches.push(recipients.slice(i, i + ANTI_SPAM_CONFIG.MAX_BATCH_SIZE));
   }
   
-  console.log(`Sending ${recipients.length} emails in ${batches.length} batches`);
-  
   for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
     const batch = batches[batchIndex];
-    console.log(`Processing batch ${batchIndex + 1}/${batches.length} with ${batch.length} recipients`);
-    
     for (const recipient of batch) {
       try {
-        // Personalize email content
         const personalizedBody = improveEmailContent(
           emailData.html, 
           recipient.name, 
           emailData.headers['List-ID'].split('@')[1].replace('>', ''),
-          campaignId
+          campaignId,
+          recipient.trackingToken
         );
         
         const mailOptions = {
@@ -145,26 +144,18 @@ const sendEmailsInBatches = async (transporter, emailData, recipients, campaignI
         
         await transporter.sendMail(mailOptions);
         results.sent++;
-        console.log(`Email sent successfully to: ${recipient.email}`);
-        
-        // Delay between individual emails
         if (ANTI_SPAM_CONFIG.DELAY_BETWEEN_EMAILS > 0) {
           await new Promise(resolve => setTimeout(resolve, ANTI_SPAM_CONFIG.DELAY_BETWEEN_EMAILS));
         }
-        
       } catch (error) {
         results.failed++;
         results.errors.push({
           email: recipient.email,
           error: error.message
         });
-        console.error(`Failed to send email to ${recipient.email}:`, error.message);
       }
     }
-    
-    // Delay between batches (except for the last batch)
     if (batchIndex < batches.length - 1 && ANTI_SPAM_CONFIG.DELAY_BETWEEN_BATCHES > 0) {
-      console.log(`Waiting ${ANTI_SPAM_CONFIG.DELAY_BETWEEN_BATCHES}ms before next batch...`);
       await new Promise(resolve => setTimeout(resolve, ANTI_SPAM_CONFIG.DELAY_BETWEEN_BATCHES));
     }
   }
@@ -172,25 +163,21 @@ const sendEmailsInBatches = async (transporter, emailData, recipients, campaignI
   return results;
 };
 
-// Helper function to validate file type
 const validateFileType = (file, allowedTypes) => {
   const fileExtension = path.extname(file.originalname).toLowerCase();
   return allowedTypes.includes(fileExtension);
 };
 
-// Helper function to read recipients from different file types
 const readRecipientsFromFile = async (file) => {
   const fileExtension = path.extname(file.originalname).toLowerCase();
   
   try {
     if (fileExtension === '.txt') {
-      // Handle .txt files (email addresses only)
       const recipientsData = fs.readFileSync(file.path, 'utf-8');
       const emails = recipientsData.split(/\r?\n/).filter((email) => email.trim() !== '');
       return emails.map(email => ({ email: email.trim(), name: null }));
     } 
     else if (fileExtension === '.csv') {
-      // Handle .csv files
       return new Promise((resolve, reject) => {
         const recipients = [];
         let hasNameColumn = false;
@@ -198,16 +185,12 @@ const readRecipientsFromFile = async (file) => {
         fs.createReadStream(file.path)
           .pipe(csv())
           .on('headers', (headers) => {
-            // Check if 'name' column exists (case-insensitive)
-            hasNameColumn = headers.some(header => 
-              header.toLowerCase().trim() === 'name'
-            );
+            hasNameColumn = headers.some(header => header.toLowerCase().trim() === 'name');
             if (!hasNameColumn) {
               reject(new Error('CSV file must contain a "name" column'));
             }
           })
           .on('data', (row) => {
-            // Find email and name columns (case-insensitive)
             const emailKey = Object.keys(row).find(key => 
               key.toLowerCase().includes('email') || key.toLowerCase().includes('mail')
             );
@@ -231,7 +214,6 @@ const readRecipientsFromFile = async (file) => {
       });
     } 
     else if (fileExtension === '.xlsx') {
-      // Handle .xlsx files
       const workbook = xlsx.readFile(file.path);
       const sheetName = workbook.SheetNames[0];
       const sheet = workbook.Sheets[sheetName];
@@ -241,17 +223,12 @@ const readRecipientsFromFile = async (file) => {
         throw new Error('Excel file is empty');
       }
       
-      // Check if 'name' column exists (case-insensitive)
       const headers = Object.keys(data[0]);
-      const hasNameColumn = headers.some(header => 
-        header.toLowerCase().trim() === 'name'
-      );
-      
+      const hasNameColumn = headers.some(header => header.toLowerCase().trim() === 'name');
       if (!hasNameColumn) {
         throw new Error('Excel file must contain a "name" column');
       }
       
-      // Extract recipients
       const recipients = [];
       data.forEach(row => {
         const emailKey = Object.keys(row).find(key => 
@@ -279,14 +256,10 @@ const readRecipientsFromFile = async (file) => {
   }
 };
 
-// API endpoint to send bulk emails
 router.post(
   '/send-bulk-mail',
-  authenticate, // Protect the route with authentication
-  upload.fields([
-    { name: 'recipientsFile' }, // File containing recipient email addresses
-    { name: 'htmlTemplate' },   // HTML template for the email body
-  ]),
+  authenticate,
+  upload.fields([{ name: 'recipientsFile' }, { name: 'htmlTemplate' }]),
   async (req, res) => {
     try {
       const {
@@ -294,24 +267,21 @@ router.post(
         smtpPort,
         smtpUsername,
         smtpPassword,
-        fromEmail, // Display name for the sender
+        fromEmail,
         emailSubject,
         campaignName,
       } = req.body;
 
-      // Validate required fields
       if (!smtpHost || !smtpPort || !smtpUsername || !smtpPassword || !fromEmail || !emailSubject || !campaignName) {
         return res.status(400).json({ error: 'Missing required SMTP, email, or campaign details.' });
       }
 
-      // Validate uploaded files
       const recipientsFile = req.files?.recipientsFile?.[0];
       const htmlTemplateFile = req.files?.htmlTemplate?.[0];
       if (!recipientsFile || !htmlTemplateFile) {
         return res.status(400).json({ error: 'Recipients file and HTML template file are required.' });
       }
 
-      // Validate recipients file type
       const allowedRecipientTypes = ['.txt', '.csv', '.xlsx'];
       if (!validateFileType(recipientsFile, allowedRecipientTypes)) {
         return res.status(400).json({ 
@@ -319,7 +289,6 @@ router.post(
         });
       }
 
-      // Validate HTML template file type
       const allowedTemplateTypes = ['.html', '.htm', '.txt'];
       if (!validateFileType(htmlTemplateFile, allowedTemplateTypes)) {
         return res.status(400).json({ 
@@ -327,91 +296,67 @@ router.post(
         });
       }
 
-      // Read recipients from file with validation
-      let recipientsData;
-      try {
-        recipientsData = await readRecipientsFromFile(recipientsFile);
-      } catch (error) {
-        return res.status(400).json({ error: error.message });
-      }
-
-      // Read email body from HTML template file
+      const recipientsData = await readRecipientsFromFile(recipientsFile);
       const emailBody = fs.readFileSync(htmlTemplateFile.path, 'utf-8');
-
-      // Extract domain for anti-spam headers
       const fromDomain = smtpUsername.split('@')[1] || 'localhost';
       
-      // Check for spam keywords in subject and email body
       const spamCheck = containsSpamKeywords(emailSubject, emailBody);
       if (spamCheck.hasSpamKeywords) {
         console.warn('Warning: Potential spam keywords detected:', spamCheck.foundKeywords);
-        // You can choose to block the email or just warn
-        // return res.status(400).json({ 
-        //   error: 'Email contains potential spam keywords', 
-        //   keywords: spamCheck.foundKeywords 
-        // });
       }
 
-      // Configure Nodemailer transporter with anti-spam settings
       const transporter = nodemailer.createTransport({
         host: smtpHost,
         port: parseInt(smtpPort),
-        secure: smtpPort == 465, // Use secure connection for port 465
+        secure: smtpPort == 465,
         auth: {
           user: smtpUsername,
           pass: smtpPassword,
         },
-        // Additional anti-spam configurations
-        pool: true, // Use connection pooling
-        maxConnections: 5, // Limit concurrent connections
-        maxMessages: 100, // Limit messages per connection
-        rateDelta: 1000, // Rate limiting: 1 second
-        rateLimit: 5, // Rate limiting: 5 emails per rateDelta
+        pool: true,
+        maxConnections: 5,
+        maxMessages: 100,
+        rateDelta: 1000,
+        rateLimit: 5,
         tls: {
-          rejectUnauthorized: false, // Accept self-signed certificates
+          rejectUnauthorized: false,
           ciphers: 'SSLv3'
         }
       });
 
-      // Extract emails for database storage
-      const emailAddresses = recipientsData.map(recipient => recipient.email);
+      const recipientsWithTokens = recipientsData.map(recipient => ({
+        email: recipient.email,
+        name: recipient.name,
+        trackingToken: crypto.randomBytes(16).toString('hex')
+      }));
 
-      // Save campaign data to MongoDB
       const newCampaign = new Campaign({
-        userId: req.user._id, // Authenticated user's ID from middleware
+        userId: req.user._id,
         campaignName,
-        toolType: 'mail-sender', // Static name for the Gmail sender tool
+        toolType: 'mail-sender',
         smtpHost,
         smtpPort: parseInt(smtpPort),
         smtpUsername,
-        smtpPassword, // Consider encrypting this in production
+        smtpPassword,
         fromEmail,
         emailSubject,
-        recipients: emailAddresses, // Store email addresses for backward compatibility
-        recipientsWithNames: recipientsData, // Store full recipient data with names
-        status: 'pending', // Add status to track progress
-        createdAt: new Date(), // Add timestamp
+        recipients: recipientsWithTokens,
+        status: 'pending',
       });
 
       await newCampaign.save();
-      console.log('New campaign saved:', newCampaign);
 
-      // Construct the "from" field with display name (more professional)
       const fromField = `"${fromEmail}" <${smtpUsername}>`;
-      
-      // Get anti-spam headers
       const antiSpamHeaders = getAntiSpamHeaders(fromDomain, newCampaign._id);
 
-      // Filter valid email addresses
-      const validRecipients = recipientsData.filter((recipient) => 
+      const validRecipients = newCampaign.recipients.filter(recipient => 
         /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(recipient.email)
       );
-      
+
       if (validRecipients.length === 0) {
         return res.status(400).json({ error: 'No valid email addresses found in recipients file.' });
       }
 
-      // Check rate limiting
       if (validRecipients.length > ANTI_SPAM_CONFIG.MAX_EMAILS_PER_HOUR) {
         return res.status(400).json({ 
           error: `Too many recipients. Maximum ${ANTI_SPAM_CONFIG.MAX_EMAILS_PER_HOUR} emails per batch allowed.`,
@@ -420,16 +365,11 @@ router.post(
         });
       }
 
-      // Improve email content for better deliverability
-      const improvedEmailBody = improveEmailContent(emailBody, null, fromDomain, newCampaign._id);
-
-      // Prepare email data with anti-spam headers
       const emailData = {
         from: fromField,
         subject: emailSubject,
-        html: improvedEmailBody,
+        html: emailBody,
         headers: antiSpamHeaders,
-        // Additional options for better deliverability
         envelope: {
           from: smtpUsername,
           to: validRecipients.map(r => r.email)
@@ -439,40 +379,22 @@ router.post(
         encoding: 'utf8'
       };
 
-      console.log(`Preparing to send ${validRecipients.length} emails with anti-spam measures`);
-
-      // Send emails in batches with delays to avoid spam detection
       const sendResults = await sendEmailsInBatches(transporter, emailData, validRecipients, newCampaign._id);
 
-      // Update campaign status with results
       newCampaign.status = 'completed';
-      newCampaign.emailsSent = sendResults.sent;
-      newCampaign.emailsFailed = sendResults.failed;
-      newCampaign.sendErrors = sendResults.errors;
       await newCampaign.save();
 
-      // Close transporter
       transporter.close();
-
-      // Clean up uploaded files
       fs.unlinkSync(recipientsFile.path);
       fs.unlinkSync(htmlTemplateFile.path);
 
       res.json({ 
-        message: 'Bulk emails sent successfully with anti-spam measures!', 
+        message: 'Bulk emails sent successfully!', 
         campaignId: newCampaign._id, 
         success: true,
         totalRecipients: validRecipients.length,
         emailsSent: sendResults.sent,
         emailsFailed: sendResults.failed,
-        recipientsWithNames: validRecipients.filter(r => r.name).length,
-        antiSpamFeatures: {
-          batchSending: true,
-          rateLimiting: true,
-          properHeaders: true,
-          unsubscribeLink: true,
-          spamKeywordCheck: spamCheck.hasSpamKeywords ? spamCheck.foundKeywords : null
-        }
       });
     } catch (error) {
       console.error('Error sending bulk emails:', error);
@@ -481,18 +403,115 @@ router.post(
   }
 );
 
-// API endpoint to get user-specific campaigns
 router.get('/campaigns', authenticate, async (req, res) => {
   try {
-    // Fetch campaigns only for the authenticated user
     const campaigns = await Campaign.find({ userId: req.user._id })
-      .select('-smtpPassword') // Exclude sensitive fields
+      .select('-smtpPassword')
       .sort({ createdAt: -1 });
-    console.log(`Fetched ${campaigns.length} campaigns for user ${req.user._id}`);
     res.json(campaigns);
   } catch (error) {
     console.error('Error fetching campaigns:', error);
     res.status(500).json({ error: 'Failed to fetch campaigns', details: error.message });
+  }
+});
+
+router.get('/track/open', async (req, res) => {
+  const token = req.query.token;
+  if (!token) {
+    return res.status(400).send('Missing token');
+  }
+  
+  try {
+    const campaign = await Campaign.findOne({ 'recipients.trackingToken': token });
+    if (campaign) {
+      const recipient = campaign.recipients.find(r => r.trackingToken === token);
+      if (recipient) {
+        const trackingEvent = new TrackingEvent({
+          campaignId: campaign._id,
+          recipientEmail: recipient.email,
+          eventType: 'open',
+          timestamp: new Date()
+        });
+        await trackingEvent.save();
+        res.set('Content-Type', 'image/gif');
+        res.send(Buffer.from('R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==', 'base64'));
+      } else {
+        res.status(404).send('Recipient not found');
+      }
+    } else {
+      res.status(404).send('Campaign not found');
+    }
+  } catch (error) {
+    console.error('Error tracking open:', error);
+    res.status(500).send('Server error');
+  }
+});
+
+router.get('/track/click', async (req, res) => {
+  const token = req.query.token;
+  const url = req.query.url;
+  if (!token || !url) {
+    return res.status(400).send('Missing token or url');
+  }
+  
+  try {
+    const campaign = await Campaign.findOne({ 'recipients.trackingToken': token });
+    if (campaign) {
+      const recipient = campaign.recipients.find(r => r.trackingToken === token);
+      if (recipient) {
+        const trackingEvent = new TrackingEvent({
+          campaignId: campaign._id,
+          recipientEmail: recipient.email,
+          eventType: 'click',
+          timestamp: new Date(),
+          details: decodeURIComponent(url)
+        });
+        await trackingEvent.save();
+        res.redirect(decodeURIComponent(url));
+      } else {
+        res.status(404).send('Recipient not found');
+      }
+    } else {
+      res.status(404).send('Campaign not found');
+    }
+  } catch (error) {
+    console.error('Error tracking click:', error);
+    res.status(500).send('Server error');
+  }
+});
+
+router.get('/latest-campaigns', authenticate, async (req, res) => {
+  try {
+    const campaigns = await Campaign.find({ userId: req.user._id })
+      .sort({ createdAt: -1 })
+      .limit(5)
+      .select('-smtpPassword');
+    
+    const campaignsWithStats = await Promise.all(campaigns.map(async (campaign) => {
+      const openRecipients = await TrackingEvent.distinct('recipientEmail', {
+        campaignId: campaign._id,
+        eventType: 'open'
+      });
+      const clickRecipients = await TrackingEvent.distinct('recipientEmail', {
+        campaignId: campaign._id,
+        eventType: 'click'
+      });
+      const totalRecipients = campaign.recipients.length;
+      const openRate = totalRecipients > 0 ? (openRecipients.length / totalRecipients) * 100 : 0;
+      const clickRate = totalRecipients > 0 ? (clickRecipients.length / totalRecipients) * 100 : 0;
+      
+      return {
+        ...campaign.toObject(),
+        openRate: openRate.toFixed(2) + '%',
+        clickRate: clickRate.toFixed(2) + '%',
+        totalRecipients
+      };
+    }));
+    
+    res.json(campaignsWithStats);
+  } catch (error) {
+    console.error('Error fetching latest campaigns:', error);
+    res.status(500).json({ error: 'Failed to fetch latest campaigns', details: error.message });
   }
 });
 
