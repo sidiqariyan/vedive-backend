@@ -60,7 +60,7 @@ const getAntiSpamHeaders = (domain, campaignId) => {
   };
 };
 
-onst improveEmailContent = (emailBody, recipientName, domain, campaignId, trackingToken) => {
+const improveEmailContent = (emailBody, recipientName, domain, campaignId, trackingToken) => {
   let improvedBody = emailBody;
   
   if (recipientName) {
