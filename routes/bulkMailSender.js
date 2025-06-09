@@ -349,24 +349,26 @@ router.post(
       }
 
       // Configure Nodemailer transporter with FIXED anti-spam settings
-      const transporter = nodemailer.createTransporter({
-        host: smtpHost,
-        port: parseInt(smtpPort),
-        secure: smtpPort == 465, // Use secure connection for port 465
-        auth: {
-          user: smtpUsername,
-          pass: smtpPassword,
-        },
-        // Additional anti-spam configurations
-        pool: true, // Use connection pooling
-        maxConnections: 5, // Limit concurrent connections
-        maxMessages: 100, // Limit messages per connection
-        rateDelta: 1000, // Rate limiting: 1 second
-        rateLimit: 5, // Rate limiting: 5 emails per rateDelta
-        tls: {
-          rejectUnauthorized: false, // Accept self-signed certificates
-          ciphers: 'SSLv3'
-        },
+      // ✅ Correct usage
+const transporter = nodemailer.createTransport({
+  host: smtpHost,
+  port: parseInt(smtpPort),
+  secure: smtpPort == 465,
+  auth: {
+    user: smtpUsername,
+    pass: smtpPassword,
+  },
+  pool: true,
+  maxConnections: 5,
+  maxMessages: 100,
+  rateDelta: 1000,
+  rateLimit: 5,
+  tls: {
+    rejectUnauthorized: false,
+    ciphers: 'SSLv3'
+  }
+});
+
         // FIXED: Remove DKIM configuration that was causing the error
         // The error was caused by DKIM trying to process an undefined domain
         // We'll handle email authentication through proper headers instead
