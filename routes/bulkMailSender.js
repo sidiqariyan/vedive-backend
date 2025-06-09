@@ -370,12 +370,6 @@ router.post(
         tls: {
           rejectUnauthorized: false, // Accept self-signed certificates
           ciphers: 'SSLv3'
-        },
-        dkim: {
-          // You can add DKIM signing here if you have keys
-          // domainName: fromDomain,
-          // keySelector: 'default',
-          // privateKey: 'your-private-key'
         }
       });
 
