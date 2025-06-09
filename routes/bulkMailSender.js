@@ -60,7 +60,7 @@ const getAntiSpamHeaders = (domain, campaignId) => {
   };
 };
 
-const improveEmailContent = (emailBody, recipientName, domain, campaignId, trackingToken) => {
+onst improveEmailContent = (emailBody, recipientName, domain, campaignId, trackingToken) => {
   let improvedBody = emailBody;
   
   if (recipientName) {
@@ -90,8 +90,15 @@ const improveEmailContent = (emailBody, recipientName, domain, campaignId, track
         $(this).attr('href', trackingUrl);
       }
     });
-    const trackingPixel = `<img src="${process.env.BASE_URL}/track/open?token=${trackingToken}" width="1" height="1" alt="" />`;
-    $('body').append(trackingPixel);
+    
+    // FIX: Add tracking pixel BEFORE </body> tag, not after
+    const trackingPixel = `<img src="${process.env.BASE_URL}/track/open?token=${trackingToken}" width="1" height="1" alt="" style="display:none;" />`;
+    if ($('body').length > 0) {
+      $('body').append(trackingPixel);
+    } else {
+      // If no body tag, add at the end
+      $ = cheerio.load(improvedBody + trackingPixel);
+    }
     improvedBody = $.html();
   }
   
