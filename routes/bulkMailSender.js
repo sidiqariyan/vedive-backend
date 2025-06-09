@@ -341,7 +341,7 @@ router.post(
         console.warn('Warning: Potential spam keywords detected:', spamCheck.foundKeywords);
       }
 
-      const transporter = nodemailer.createTransporter({
+      const transporter = nodemailer.createTransport({
         host: smtpHost,
         port: parseInt(smtpPort),
         secure: smtpPort == 465,
