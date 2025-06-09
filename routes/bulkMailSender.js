@@ -348,8 +348,8 @@ router.post(
         // });
       }
 
-      // Configure Nodemailer transporter with anti-spam settings
-      const transporter = nodemailer.createTransport({
+      // Configure Nodemailer transporter with FIXED anti-spam settings
+      const transporter = nodemailer.createTransporter({
         host: smtpHost,
         port: parseInt(smtpPort),
         secure: smtpPort == 465, // Use secure connection for port 465
@@ -367,12 +367,9 @@ router.post(
           rejectUnauthorized: false, // Accept self-signed certificates
           ciphers: 'SSLv3'
         },
-        dkim: {
-          // You can add DKIM signing here if you have keys
-          // domainName: fromDomain,
-          // keySelector: 'default',
-          // privateKey: 'your-private-key'
-        }
+        // FIXED: Remove DKIM configuration that was causing the error
+        // The error was caused by DKIM trying to process an undefined domain
+        // We'll handle email authentication through proper headers instead
       });
 
       // Extract emails for database storage
@@ -398,8 +395,11 @@ router.post(
       await newCampaign.save();
       console.log('New campaign saved:', newCampaign);
 
-      // Construct the "from" field with display name (more professional)
-      const fromField = `"${fromEmail}" <${smtpUsername}>`;
+      // FIXED: Construct the "from" field properly
+      // Use the actual email address as the sender, with display name if provided
+      const fromField = fromEmail.includes('@') 
+        ? fromEmail // If fromEmail is already an email address, use it directly
+        : `"${fromEmail}" <${smtpUsername}>`; // Otherwise, use it as display name with SMTP username
       
       // Get anti-spam headers
       const antiSpamHeaders = getAntiSpamHeaders(fromDomain, newCampaign._id);
@@ -425,16 +425,16 @@ router.post(
       // Improve email content for better deliverability
       const improvedEmailBody = improveEmailContent(emailBody, null, fromDomain, newCampaign._id);
 
-      // Prepare email data with anti-spam headers
+      // FIXED: Prepare email data with proper envelope configuration
       const emailData = {
         from: fromField,
         subject: emailSubject,
         html: improvedEmailBody,
         headers: antiSpamHeaders,
-        // Additional options for better deliverability
+        // FIXED: Simplified envelope configuration
         envelope: {
-          from: smtpUsername,
-          to: validRecipients.map(r => r.email)
+          from: smtpUsername, // Use SMTP username as envelope sender
+          // to will be set individually for each recipient
         },
         messageId: antiSpamHeaders['Message-ID'],
         date: new Date(),
