@@ -349,7 +349,7 @@ router.post(
       }
 
       // Configure Nodemailer transporter with anti-spam settings
-      const transporter = nodemailer.createTransporter({
+      const transporter = nodemailer.createTransport({
         host: smtpHost,
         port: parseInt(smtpPort),
         secure: smtpPort == 465, // Use secure connection for port 465
