@@ -40,7 +40,7 @@ const campaignSchema = new mongoose.Schema(
     recipients: [recipientSchema],
     status: { 
       type: String, 
-      enum: ["pending", "in-progress", "completed", "failed"], 
+      enum: ["pending", "sending", "in-progress", "completed", "failed"], 
       default: "pending" 
     },
   },
