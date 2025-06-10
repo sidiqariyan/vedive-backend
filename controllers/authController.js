@@ -12,29 +12,6 @@ const generateToken = (payload, expiresIn = "1h") => {
   return jwt.sign(payload, process.env.JWT_SECRET, { expiresIn });
 };
 
-// Helper Function: Set JWT Cookie
-const setTokenCookie = (res, token) => {
-  const cookieOptions = {
-    httpOnly: true, // Prevents XSS attacks
-    secure: process.env.NODE_ENV === 'production', // HTTPS only in production
-    sameSite: 'strict', // CSRF protection
-    maxAge: 30 * 24 * 60 * 60 * 1000, // 30 days
-    path: '/'
-  };
-  
-  res.cookie('auth_token', token, cookieOptions);
-};
-
-// Helper Function: Clear JWT Cookie
-const clearTokenCookie = (res) => {
-  res.clearCookie('auth_token', {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === 'production',
-    sameSite: 'strict',
-    path: '/'
-  });
-};
-
 /**
  * Register a new user
  * @route POST /api/auth/register
@@ -205,12 +182,12 @@ exports.verifyEmail = async (req, res) => {
 
     console.log("User verified successfully:", user.email);
 
-    // Generate login token and set as HTTP-only cookie
+    // Generate login token for auto-login after verification
     const loginToken = generateToken({ _id: user._id }, "30d");
-    setTokenCookie(res, loginToken);
 
     res.status(200).json({
       message: "Email verified successfully! Welcome to Vedive.",
+      token: loginToken,
       user: {
         _id: user._id,
         name: user.name,
@@ -243,10 +220,10 @@ exports.verifyEmail = async (req, res) => {
           await user.save();
 
           const loginToken = generateToken({ _id: user._id }, "30d");
-          setTokenCookie(res, loginToken);
           
           return res.status(200).json({
             message: "Email verified successfully! Welcome to Vedive.",
+            token: loginToken,
             user: {
               _id: user._id,
               name: user.name,
@@ -306,12 +283,11 @@ exports.login = async (req, res) => {
       });
     }
 
-    // Generate JWT token and set as HTTP-only cookie
+    // Generate JWT token with 30-day expiry
     const token = generateToken({ _id: user._id }, '30d');
-    setTokenCookie(res, token);
-
     res.status(200).json({
       message: "Login successful",
+      token,
       user: {
         _id: user._id,
         name: user.name,
@@ -322,20 +298,6 @@ exports.login = async (req, res) => {
   } catch (error) {
     console.error("Login Error:", error);
     res.status(500).json({ error: "Login failed" });
-  }
-};
-
-/**
- * Logout User
- * @route POST /api/auth/logout
- */
-exports.logout = async (req, res) => {
-  try {
-    clearTokenCookie(res);
-    res.status(200).json({ message: "Logged out successfully" });
-  } catch (error) {
-    console.error("Logout Error:", error);
-    res.status(500).json({ error: "Logout failed" });
   }
 };
 
@@ -588,12 +550,11 @@ exports.googleCallback = async (req, res) => {
       await user.save();
     }
 
-    // Generate JWT token and set as HTTP-only cookie
+    // Generate JWT token
     const token = generateToken({ _id: user._id }, '30d');
-    setTokenCookie(res, token);
     
-    // Redirect to frontend without token in URL
-    const redirectUrl = `${process.env.FRONTEND_URL}/oauth2/redirect?success=true`;
+    // Redirect to frontend with token
+    const redirectUrl = `${process.env.FRONTEND_URL}/oauth2/redirect?token=${encodeURIComponent(token)}`;
     res.redirect(redirectUrl);
     
   } catch (error) {
@@ -603,81 +564,15 @@ exports.googleCallback = async (req, res) => {
 };
 
 /**
- * Check Authentication Status
- * @route GET /api/auth/check
- */
-exports.checkAuth = async (req, res) => {
-  try {
-    const token = req.cookies.auth_token;
-    
-    if (!token) {
-      return res.status(401).json({ 
-        authenticated: false, 
-        error: "No authentication token found" 
-      });
-    }
-
-    // Verify JWT token
-    const decoded = jwt.verify(token, process.env.JWT_SECRET);
-    
-    // Find user by ID
-    const user = await User.findById(decoded._id).select("-password");
-    
-    if (!user) {
-      clearTokenCookie(res);
-      return res.status(404).json({ 
-        authenticated: false, 
-        error: "User not found" 
-      });
-    }
-
-    // Return user data
-    res.status(200).json({
-      authenticated: true,
-      user: {
-        _id: user._id,
-        name: user.name,
-        username: user.username,
-        email: user.email,
-        isVerified: user.isVerified
-      }
-    });
-
-  } catch (error) {
-    console.error("Auth check error:", error);
-    clearTokenCookie(res);
-    
-    if (error.name === 'JsonWebTokenError') {
-      return res.status(401).json({ 
-        authenticated: false, 
-        error: "Invalid token" 
-      });
-    }
-    
-    if (error.name === 'TokenExpiredError') {
-      return res.status(401).json({ 
-        authenticated: false, 
-        error: "Token expired" 
-      });
-    }
-    
-    res.status(500).json({ 
-      authenticated: false, 
-      error: "Authentication check failed" 
-    });
-  }
-};
-
-/**
  * Verify Token (for OAuth callback)
  * @route POST /api/auth/verify-token
  */
 exports.verifyToken = async (req, res) => {
   try {
-    const token = req.cookies.auth_token;
+    const { token } = req.body;
     
     if (!token) {
-      return res.status(400).json({ error: "No authentication token found" });
+      return res.status(400).json({ error: "Token is required" });
     }
 
     // Verify JWT token
@@ -687,25 +582,17 @@ exports.verifyToken = async (req, res) => {
     const user = await User.findById(decoded._id).select("-password");
     
     if (!user) {
-      clearTokenCookie(res);
       return res.status(404).json({ error: "User not found" });
     }
 
     // Return user data
     res.status(200).json({
       message: "Token is valid",
-      user: user.toSafeObject ? user.toSafeObject() : {
-        _id: user._id,
-        name: user.name,
-        username: user.username,
-        email: user.email,
-        isVerified: user.isVerified
-      }
+      user: user.toSafeObject()
     });
 
   } catch (error) {
     console.error("Token verification error:", error);
-    clearTokenCookie(res);
     
     if (error.name === 'JsonWebTokenError') {
       return res.status(401).json({ error: "Invalid token" });
