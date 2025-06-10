@@ -10,30 +10,21 @@ const User = require("../models/User");
  */
 const authenticate = async (req, res, next) => {
   try {
-    let token;
+    // Extract token from Authorization header
     const authHeader = req.headers.authorization;
-
-    // Check Authorization header first
-    if (authHeader && authHeader.startsWith("Bearer ")) {
-      token = authHeader.split(" ")[1];
-      console.log("DEBUG: Token found in Authorization header");
-    } 
-    // Fallback to cookie if no header token
-    else if (req.cookies && req.cookies.authToken) {
-      token = req.cookies.authToken;
-      console.log("DEBUG: Token found in authToken cookie");
-    } 
-    else {
-      console.log("DEBUG: No token provided in header or cookie");
-      return res.status(401).json({ error: "No token provided" });
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      console.log("DEBUG: Invalid or missing Authorization header");
+      return res.status(401).json({ error: "Invalid or missing Authorization header" });
     }
+
+    const token = authHeader.split(" ")[1]; // Extract token after "Bearer "
 
     // Log masked token for debugging
     console.log(`DEBUG: Token received (masked): ${token.substring(0, 10)}...`);
 
     // Check if token exists
     if (!token) {
-      console.log("DEBUG: Token is empty after extraction");
+      console.log("DEBUG: No token provided after parsing header");
       return res.status(401).json({ error: "No token provided" });
     }
 
@@ -44,7 +35,7 @@ const authenticate = async (req, res, next) => {
     }
 
     console.log(`DEBUG: JWT_SECRET exists: ${!!process.env.JWT_SECRET}`);
-    console.log(`DEBUG: JWT_SECRET length: ${"*".repeat(process.env.JWT_SECRET.length)}`);
+    console.log(`DEBUG: JWT_SECRET length: ${"*".repeat(process.env.JWT_SECRET.length)}`); // Masked length
 
     // Verify the token
     try {
@@ -74,7 +65,7 @@ const authenticate = async (req, res, next) => {
 
       console.log(`DEBUG: Token expires in ${timeToExpire} seconds`);
 
-      // If token expires in less than 30 days, add refresh flag
+      // If token expires in less than 30days, add refresh flag
       if (decoded.exp && timeToExpire < 2592000 && timeToExpire > 0) {
         req.tokenExpiring = true;
         console.log("DEBUG: Token marked as expiring soon");
@@ -93,7 +84,7 @@ const authenticate = async (req, res, next) => {
       next();
     } catch (verifyError) {
       console.error("DEBUG: JWT verification failed with error:", verifyError.message);
-      throw verifyError;
+      throw verifyError; // Re-throw to be caught by outer catch
     }
   } catch (error) {
     console.error("Authentication Error:", error);
@@ -107,6 +98,7 @@ const authenticate = async (req, res, next) => {
     return res.status(401).json({ error: "Authentication failed" });
   }
 };
+
 /**
  * Refresh Token Middleware
  * Attaches a new token to the response if the current token is about to expire
