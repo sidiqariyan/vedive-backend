@@ -471,6 +471,10 @@ exports.googleAuth = (req, res) => {
  * Handle Google OAuth Callback
  * @route GET /api/auth/google/callback
  */
+/**
+ * Handle Google OAuth Callback
+ * @route GET /api/auth/google/callback
+ */
 exports.googleCallback = async (req, res) => {
   try {
     const { code } = req.query;
@@ -553,16 +557,22 @@ exports.googleCallback = async (req, res) => {
     // Generate JWT token
     const token = generateToken({ _id: user._id }, '30d');
     
-    // Redirect to frontend with token
-    const redirectUrl = `${process.env.FRONTEND_URL}/oauth2/redirect?token=${encodeURIComponent(token)}`;
-    res.redirect(redirectUrl);
+    // Set token in HttpOnly cookie
+    res.cookie('authToken', token, {
+      httpOnly: true,                  // Prevents client-side JavaScript access
+      secure: process.env.NODE_ENV === 'production', // Use secure cookies in production (HTTPS)
+      sameSite: 'strict',             // Mitigates CSRF attacks
+      maxAge: 30 * 24 * 60 * 60 * 1000 // 30 days in milliseconds
+    });
+
+    // Redirect to frontend dashboard
+    res.redirect(`${process.env.FRONTEND_URL}/dashboard`);
     
   } catch (error) {
     console.error('Google OAuth Error:', error);
     res.redirect(`${process.env.FRONTEND_URL}/oauth2/redirect?error=oauth_failed`);
   }
 };
-
 /**
  * Verify Token (for OAuth callback)
  * @route POST /api/auth/verify-token
