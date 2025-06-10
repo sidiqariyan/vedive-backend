@@ -1,178 +1,127 @@
-const jwt = require('jsonwebtoken');
-const User = require('../models/User');
+const jwt = require("jsonwebtoken");
+const User = require("../models/User");
 
 /**
- * Middleware to authenticate user using HTTP-only cookies
+ * Authenticate Middleware with enhanced debugging
+ * Verifies the JWT token and attaches the authenticated user to the request object.
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {Function} next - Next middleware function
  */
 const authenticate = async (req, res, next) => {
   try {
-    // Get token from cookies instead of Authorization header
-    const token = req.cookies.auth_token;
-    
-    if (!token) {
-      return res.status(401).json({ 
-        error: 'Access denied. No authentication token found.',
-        requiresAuth: true 
-      });
+    // Extract token from Authorization header
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      console.log("DEBUG: Invalid or missing Authorization header");
+      return res.status(401).json({ error: "Invalid or missing Authorization header" });
     }
 
+    const token = authHeader.split(" ")[1]; // Extract token after "Bearer "
+
+    // Log masked token for debugging
+    console.log(`DEBUG: Token received (masked): ${token.substring(0, 10)}...`);
+
+    // Check if token exists
+    if (!token) {
+      console.log("DEBUG: No token provided after parsing header");
+      return res.status(401).json({ error: "No token provided" });
+    }
+
+    // Ensure JWT_SECRET exists and log status
+    if (!process.env.JWT_SECRET) {
+      console.error("DEBUG: JWT_SECRET is not defined in environment variables");
+      return res.status(500).json({ error: "Server configuration error" });
+    }
+
+    console.log(`DEBUG: JWT_SECRET exists: ${!!process.env.JWT_SECRET}`);
+    console.log(`DEBUG: JWT_SECRET length: ${"*".repeat(process.env.JWT_SECRET.length)}`); // Masked length
+
+    // Verify the token
     try {
-      // Verify the token
       const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      
-      // Find the user
-      const user = await User.findById(decoded._id).select('-password');
-      
+      console.log("DEBUG: Token verified successfully");
+
+      // Ensure the token contains a valid user ID
+      if (!decoded._id) {
+        console.log("DEBUG: Invalid token payload - missing _id");
+        return res.status(401).json({ error: "Invalid token payload" });
+      }
+
+      console.log(`DEBUG: User ID from token: ${decoded._id}`);
+
+      // Find the user in the database
+      const user = await User.findById(decoded._id);
       if (!user) {
-        // Clear invalid cookie
-        res.clearCookie('auth_token', {
-          httpOnly: true,
-          secure: process.env.NODE_ENV === 'production',
-          sameSite: 'strict',
-          path: '/'
-        });
-        return res.status(401).json({ 
-          error: 'User not found. Please log in again.',
-          requiresAuth: true 
-        });
+        console.log(`DEBUG: User not found for ID: ${decoded._id}`);
+        return res.status(401).json({ error: "User not found" });
       }
 
-      // Check if user is verified (optional, depending on your requirements)
-      if (!user.isVerified) {
-        return res.status(401).json({ 
-          error: 'Please verify your email address.',
-          needsVerification: true,
-          email: user.email 
-        });
+      console.log(`DEBUG: User found: ${user._id}`);
+
+      // Add token expiration check
+      const currentTime = Math.floor(Date.now() / 1000);
+      const timeToExpire = decoded.exp - currentTime;
+
+      console.log(`DEBUG: Token expires in ${timeToExpire} seconds`);
+
+      // If token expires in less than 30days, add refresh flag
+      if (decoded.exp && timeToExpire < 2592000 && timeToExpire > 0) {
+        req.tokenExpiring = true;
+        console.log("DEBUG: Token marked as expiring soon");
       }
 
-      // Attach user to request object
-      req.user = {
-        _id: user._id,
-        id: user._id, // For backward compatibility
-        name: user.name,
-        username: user.username,
-        email: user.email,
-        role: user.role,
-        isVerified: user.isVerified
-      };
-      
+      // If token is already expired
+      if (decoded.exp && currentTime >= decoded.exp) {
+        console.log("DEBUG: Token already expired");
+        return res.status(401).json({ error: "Token expired. Please log in again." });
+      }
+
+      // Attach the user object to the request
+      req.user = user;
+
+      console.log("DEBUG: Authentication successful");
       next();
-    } catch (jwtError) {
-      console.error('JWT Error:', jwtError);
-      
-      // Clear invalid cookie
-      res.clearCookie('auth_token', {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
-        path: '/'
-      });
-      
-      if (jwtError.name === 'TokenExpiredError') {
-        return res.status(401).json({ 
-          error: 'Authentication token has expired. Please log in again.',
-          expired: true,
-          requiresAuth: true 
-        });
-      }
-      
-      if (jwtError.name === 'JsonWebTokenError') {
-        return res.status(401).json({ 
-          error: 'Invalid authentication token. Please log in again.',
-          requiresAuth: true 
-        });
-      }
-      
-      return res.status(401).json({ 
-        error: 'Authentication failed. Please log in again.',
-        requiresAuth: true 
-      });
+    } catch (verifyError) {
+      console.error("DEBUG: JWT verification failed with error:", verifyError.message);
+      throw verifyError; // Re-throw to be caught by outer catch
     }
   } catch (error) {
-    console.error('Authentication middleware error:', error);
-    return res.status(500).json({ 
-      error: 'Internal server error during authentication.' 
-    });
+    console.error("Authentication Error:", error);
+
+    if (error.name === "JsonWebTokenError") {
+      return res.status(401).json({ error: "Invalid token" });
+    } else if (error.name === "TokenExpiredError") {
+      return res.status(401).json({ error: "Token expired. Please log in again." });
+    }
+
+    return res.status(401).json({ error: "Authentication failed" });
   }
 };
 
 /**
- * Optional authentication middleware - doesn't fail if no token
- * Useful for routes that work for both authenticated and unauthenticated users
+ * Refresh Token Middleware
+ * Attaches a new token to the response if the current token is about to expire
+ * @param {Object} req - Express request object
+ * @param {Object} res - Express response object
+ * @param {Function} next - Next middleware function
  */
-const optionalAuth = async (req, res, next) => {
-  try {
-    const token = req.cookies.auth_token;
-    
-    if (!token) {
-      req.user = null;
-      return next();
-    }
+const refreshToken = (req, res, next) => {
+  // If token is about to expire, generate a new one
+  if (req.tokenExpiring && req.user) {
+    console.log("DEBUG: Generating refresh token");
+    const newToken = jwt.sign(
+      { _id: req.user._id },
+      process.env.JWT_SECRET,
+      { expiresIn: "1d" }
+    );
 
-    try {
-      const decoded = jwt.verify(token, process.env.JWT_SECRET);
-      const user = await User.findById(decoded._id).select('-password');
-      
-      if (user && user.isVerified) {
-        req.user = {
-          _id: user._id,
-          id: user._id,
-          name: user.name,
-          username: user.username,
-          email: user.email,
-          role: user.role,
-          isVerified: user.isVerified
-        };
-      } else {
-        req.user = null;
-      }
-    } catch (jwtError) {
-      // Clear invalid cookie silently
-      res.clearCookie('auth_token', {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
-        path: '/'
-      });
-      req.user = null;
-    }
-    
-    next();
-  } catch (error) {
-    console.error('Optional auth middleware error:', error);
-    req.user = null;
-    next();
+    // Attach token to response headers
+    res.setHeader("X-New-Token", newToken);
+    console.log("DEBUG: New token generated and attached to response");
   }
+
+  next();
 };
 
-/**
- * Role-based authorization middleware
- * Usage: authorize(['admin', 'moderator'])
- */
-const authorize = (roles = []) => {
-  return (req, res, next) => {
-    if (!req.user) {
-      return res.status(401).json({ 
-        error: 'Access denied. Authentication required.',
-        requiresAuth: true 
-      });
-    }
-
-    if (roles.length && !roles.includes(req.user.role)) {
-      return res.status(403).json({ 
-        error: 'Access denied. Insufficient permissions.',
-        requiredRoles: roles,
-        userRole: req.user.role 
-      });
-    }
-
-    next();
-  };
-};
-
-module.exports = {
-  authenticate,
-  optionalAuth,
-  authorize
-};
+module.exports = { authenticate, refreshToken };
