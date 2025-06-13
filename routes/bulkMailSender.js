@@ -1040,7 +1040,7 @@ router.get('/track/test', authenticate, async (req, res) => {
     }
     
     const recipient = campaign.recipients[0];
-    const baseUrl = process.env.BASE_URL || 'http://localhost:5000';
+    const baseUrl = process.env.BASE_URL || 'https://vedive.com:3000';
     
     const testUrls = {
       openTracking: `${baseUrl}/track/open?token=${recipient.trackingToken}`,
