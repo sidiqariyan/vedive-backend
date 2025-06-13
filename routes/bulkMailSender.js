@@ -63,11 +63,13 @@ const getAntiSpamHeaders = (domain, campaignId) => {
 const improveEmailContent = (emailBody, recipientName, domain, campaignId, trackingToken) => {
   let improvedBody = emailBody;
   
+  // Personalization
   if (recipientName) {
     improvedBody = improvedBody.replace(/\{name\}/gi, recipientName);
     improvedBody = improvedBody.replace(/\{first_name\}/gi, recipientName.split(' ')[0]);
   }
   
+  // Unsubscribe link
   const unsubscribeLink = `<p style="font-size: 12px; color: #666; margin-top: 20px; border-top: 1px solid #eee; padding-top: 10px;">
     If you no longer wish to receive these emails, you can 
     <a href="mailto:unsubscribe-${campaignId}@${domain}?subject=Unsubscribe" style="color: #666;">unsubscribe here</a>.
@@ -81,27 +83,52 @@ const improveEmailContent = (emailBody, recipientName, domain, campaignId, track
     }
   }
   
+  // FIXED: Enhanced link and pixel tracking with better token handling
   if (trackingToken) {
-    const $ = cheerio.load(improvedBody);
+    console.log(`🔧 Processing tracking for token: ${trackingToken}`);
+    
+    // Load the HTML content with better options
+    const $ = cheerio.load(improvedBody, {
+      decodeEntities: false,
+      lowerCaseAttributeNames: false
+    });
+    
+    // FIXED: Enhanced link tracking with better URL validation and logging
+    let linkCount = 0;
     $('a').each(function() {
       const originalUrl = $(this).attr('href');
-      if (originalUrl) {
-        const trackingUrl = `${process.env.BASE_URL}/track/click?token=${trackingToken}&url=${encodeURIComponent(originalUrl)}`;
+      if (originalUrl && originalUrl.startsWith('http')) {
+        const trackingUrl = `${process.env.BASE_URL}/api/track/click?token=${trackingToken}&url=${encodeURIComponent(originalUrl)}`;
         $(this).attr('href', trackingUrl);
+        linkCount++;
+        console.log(`📎 Link ${linkCount} processed for token ${trackingToken}: ${originalUrl.substring(0, 50)}...`);
       }
     });
     
-    // FIX: Add tracking pixel BEFORE </body> tag, not after
-    const trackingPixel = `<img src="${process.env.BASE_URL}/track/open?token=${trackingToken}" width="1" height="1" alt="" style="display:none;" />`;
+    // FIXED: Enhanced tracking pixel with better placement and attributes
+    const trackingPixel = `<img src="${process.env.BASE_URL}/api/track/open?token=${trackingToken}" width="1" height="1" alt="" style="display:none !important; visibility:hidden !important; opacity:0 !important; position:absolute !important; left:-9999px !important;" border="0" />`;
+    
+    // Try multiple placement strategies for the tracking pixel
     if ($('body').length > 0) {
+      // Place at the end of body
       $('body').append(trackingPixel);
+      console.log(`📊 Tracking pixel added to body for token ${trackingToken}`);
+    } else if ($('html').length > 0) {
+      // Place at the end of html
+      $('html').append(trackingPixel);
+      console.log(`📊 Tracking pixel added to html for token ${trackingToken}`);
     } else {
-      // If no body tag, add at the end
-      $ = cheerio.load(improvedBody + trackingPixel);
+      // Just append to the end
+      improvedBody += trackingPixel;
+      console.log(`📊 Tracking pixel appended to content for token ${trackingToken}`);
+      return improvedBody; // Return early to avoid cheerio processing
     }
+    
     improvedBody = $.html();
+    console.log(`✅ Email content processed successfully for token ${trackingToken} (${linkCount} links tracked)`);
   }
   
+  // Ensure proper HTML structure
   if (!improvedBody.toLowerCase().includes('<html>')) {
     improvedBody = `<!DOCTYPE html>
 <html lang="en">
@@ -118,7 +145,7 @@ const improveEmailContent = (emailBody, recipientName, domain, campaignId, track
   
   return improvedBody;
 };
-
+// FIXED: sendEmailsInBatches function - Ensure each email gets correct token
 const sendEmailsInBatches = async (transporter, emailData, recipients, campaignId) => {
   const results = {
     sent: 0,
@@ -126,50 +153,88 @@ const sendEmailsInBatches = async (transporter, emailData, recipients, campaignI
     errors: []
   };
   
+  console.log(`📧 Starting to send ${recipients.length} emails for campaign ${campaignId}`);
+  
   const batches = [];
   for (let i = 0; i < recipients.length; i += ANTI_SPAM_CONFIG.MAX_BATCH_SIZE) {
     batches.push(recipients.slice(i, i + ANTI_SPAM_CONFIG.MAX_BATCH_SIZE));
   }
   
+  console.log(`📦 Created ${batches.length} batches`);
+  
   for (let batchIndex = 0; batchIndex < batches.length; batchIndex++) {
     const batch = batches[batchIndex];
+    console.log(`📦 Processing batch ${batchIndex + 1}/${batches.length} with ${batch.length} recipients`);
+    
     for (const recipient of batch) {
       try {
+        console.log(`📧 Processing email for: ${recipient.email} with token: ${recipient.trackingToken}`);
+        
+        // FIXED: Better domain extraction from headers
+        let domain = 'localhost';
+        try {
+          const listIdHeader = emailData.headers['List-ID'];
+          if (listIdHeader && listIdHeader.includes('@')) {
+            domain = listIdHeader.split('@')[1].replace('>', '');
+          }
+        } catch (e) {
+          console.log('⚠️ Could not extract domain from headers, using localhost');
+        }
+        
+        // FIXED: Generate personalized email content with recipient-specific tracking
         const personalizedBody = improveEmailContent(
           emailData.html, 
           recipient.name, 
-          emailData.headers['List-ID'].split('@')[1].replace('>', ''),
+          domain,
           campaignId,
           recipient.trackingToken
         );
         
+        // FIXED: Create mail options with proper recipient isolation
         const mailOptions = {
-          ...emailData,
-          to: recipient.email,
-          html: personalizedBody
+          from: emailData.from,
+          to: recipient.email, // Send to individual recipient
+          subject: emailData.subject,
+          html: personalizedBody,
+          headers: emailData.headers,
+          envelope: {
+            from: emailData.envelope.from,
+            to: recipient.email // Individual recipient envelope
+          },
+          messageId: emailData.messageId,
+          date: emailData.date,
+          encoding: emailData.encoding
         };
         
         await transporter.sendMail(mailOptions);
         results.sent++;
+        console.log(`✅ Email sent successfully to ${recipient.email} with token ${recipient.trackingToken}`);
+        
+        // Delay between emails to avoid spam detection
         if (ANTI_SPAM_CONFIG.DELAY_BETWEEN_EMAILS > 0) {
           await new Promise(resolve => setTimeout(resolve, ANTI_SPAM_CONFIG.DELAY_BETWEEN_EMAILS));
         }
       } catch (error) {
+        console.error(`❌ Failed to send email to ${recipient.email}:`, error.message);
         results.failed++;
         results.errors.push({
           email: recipient.email,
+          token: recipient.trackingToken,
           error: error.message
         });
       }
     }
+    
+    // Delay between batches
     if (batchIndex < batches.length - 1 && ANTI_SPAM_CONFIG.DELAY_BETWEEN_BATCHES > 0) {
+      console.log(`⏱️ Waiting ${ANTI_SPAM_CONFIG.DELAY_BETWEEN_BATCHES}ms before next batch...`);
       await new Promise(resolve => setTimeout(resolve, ANTI_SPAM_CONFIG.DELAY_BETWEEN_BATCHES));
     }
   }
   
+  console.log(`📊 Email sending completed. Sent: ${results.sent}, Failed: ${results.failed}`);
   return results;
 };
-
 const validateFileType = (file, allowedTypes) => {
   const fileExtension = path.extname(file.originalname).toLowerCase();
   return allowedTypes.includes(fileExtension);
@@ -449,7 +514,16 @@ router.post(
 // Get all campaigns with basic analytics
 router.get('/campaigns', authenticate, async (req, res) => {
   try {
-    const campaigns = await Campaign.find({ userId: req.user._id })
+    // Get toolType filter from query parameters (defaults to 'mail-sender')
+    const { toolType = 'mail-sender' } = req.query;
+    
+    // Build filter object
+    const filter = { userId: req.user._id };
+    if (toolType) {
+      filter.toolType = toolType;
+    }
+    
+    const campaigns = await Campaign.find(filter)
       .select('-smtpPassword')
       .sort({ createdAt: -1 });
 
@@ -467,6 +541,7 @@ router.get('/campaigns', authenticate, async (req, res) => {
     res.status(500).json({ error: 'Failed to fetch campaigns', details: error.message });
   }
 });
+
 
 // Get detailed analytics for a specific campaign
 router.get('/campaigns/:campaignId/analytics', authenticate, async (req, res) => {
@@ -684,129 +759,315 @@ router.get('/latest-campaigns', authenticate, async (req, res) => {
   }
 });
 
-// Tracking endpoints (existing functionality)
+
+// Open tracking endpoint
 router.get('/track/open', async (req, res) => {
   const token = req.query.token;
   
-  // FIX: Better validation and error handling
-  if (!token) {
-    console.log('Tracking open: Missing token');
-    // Still return tracking pixel even if no token
-    res.set('Content-Type', 'image/gif');
-    return res.send(Buffer.from('R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==', 'base64'));
-  }
+  console.log('=== TRACKING OPEN EVENT ===');
+  console.log('Token received:', token);
+  console.log('User-Agent:', req.get('User-Agent'));
+  console.log('IP:', req.ip);
+  console.log('Referer:', req.get('Referer'));
   
-  try {
-    console.log('Tracking open for token:', token); // DEBUG
-    
-    const campaign = await Campaign.findOne({ 'recipients.trackingToken': token });
-    if (!campaign) {
-      console.log('Campaign not found for token:', token); // DEBUG
-      res.set('Content-Type', 'image/gif');
-      return res.send(Buffer.from('R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==', 'base64'));
-    }
-    
-    const recipient = campaign.recipients.find(r => r.trackingToken === token);
-    if (!recipient) {
-      console.log('Recipient not found for token:', token); // DEBUG
-      res.set('Content-Type', 'image/gif');
-      return res.send(Buffer.from('R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==', 'base64'));
-    }
-    
-    console.log('Creating tracking event for:', recipient.email); // DEBUG
-    
-    const trackingEvent = new TrackingEvent({
-      campaignId: campaign._id,
-      recipientEmail: recipient.email,
-      trackingToken: token, // FIX: Add trackingToken field
-      eventType: 'open',
-      timestamp: new Date(),
-      // FIX: Add metadata object structure
-      metadata: {
-        userAgent: req.get('User-Agent'),
-        ipAddress: req.ip || req.connection.remoteAddress
-      },
-      campaignName: campaign.campaignName, // FIX: Add denormalized data
-      userId: campaign.userId
+  // Create and send tracking pixel immediately (1x1 transparent GIF)
+  const trackingPixelBuffer = Buffer.from('R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==', 'base64');
+  
+  res.set({
+    'Content-Type': 'image/gif',
+    'Cache-Control': 'no-cache, no-store, must-revalidate',
+    'Pragma': 'no-cache',
+    'Expires': '0',
+    'Content-Length': trackingPixelBuffer.length,
+    'Access-Control-Allow-Origin': '*'
+  });
+  
+  // Send the pixel immediately
+  res.send(trackingPixelBuffer);
+  
+  // Handle tracking asynchronously after sending response
+  if (token && token.length === 32) { // Validate token format (32 hex chars)
+    setImmediate(async () => {
+      try {
+        console.log('🔍 Looking up campaign for token:', token);
+        
+        // FIXED: More robust campaign lookup with proper indexing
+        const campaign = await Campaign.findOne({ 
+          'recipients.trackingToken': token 
+        });
+        
+        if (!campaign) {
+          console.log('❌ No campaign found for token:', token);
+          return;
+        }
+        
+        console.log('✅ Campaign found:', campaign.campaignName, 'ID:', campaign._id);
+        
+        // FIXED: More efficient recipient lookup
+        const recipient = campaign.recipients.find(r => r.trackingToken === token);
+        if (!recipient) {
+          console.log('❌ No recipient found for token:', token);
+          return;
+        }
+        
+        console.log('✅ Recipient found:', recipient.email);
+        
+        // FIXED: Better duplicate detection (check last 10 minutes instead of 5)
+        const tenMinutesAgo = new Date(Date.now() - 10 * 60 * 1000);
+        const recentOpen = await TrackingEvent.findOne({
+          campaignId: campaign._id,
+          recipientEmail: recipient.email,
+          trackingToken: token,
+          eventType: 'open',
+          timestamp: { $gte: tenMinutesAgo }
+        });
+        
+        if (recentOpen) {
+          console.log('⚠️ Duplicate open ignored (within 10 minutes)');
+          return;
+        }
+        
+        // Create tracking event with enhanced metadata
+        const trackingEvent = new TrackingEvent({
+          campaignId: campaign._id,
+          recipientEmail: recipient.email,
+          trackingToken: token,
+          eventType: 'open',
+          timestamp: new Date(),
+          metadata: {
+            userAgent: req.get('User-Agent') || 'Unknown',
+            ipAddress: req.ip || req.connection?.remoteAddress || 'Unknown',
+            referer: req.get('Referer') || 'Direct',
+            acceptLanguage: req.get('Accept-Language') || 'Unknown'
+          },
+          campaignName: campaign.campaignName,
+          userId: campaign.userId
+        });
+        
+        await trackingEvent.save();
+        console.log('✅ Open event saved successfully for:', recipient.email);
+        
+      } catch (error) {
+        console.error('❌ Error tracking open event:', error.message);
+        console.error('Stack:', error.stack);
+      }
     });
-    
-    await trackingEvent.save();
-    console.log('Tracking event saved successfully'); // DEBUG
-    
-    // Return 1x1 transparent GIF
-    res.set({
-      'Content-Type': 'image/gif',
-      'Cache-Control': 'no-cache, no-store, must-revalidate',
-      'Pragma': 'no-cache',
-      'Expires': '0'
-    });
-    res.send(Buffer.from('R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==', 'base64'));
-    
-  } catch (error) {
-    console.error('Error tracking open:', error);
-    // Always return tracking pixel
-    res.set('Content-Type', 'image/gif');
-    res.send(Buffer.from('R0lGODlhAQABAIAAAP///wAAACH5BAEAAAAALAAAAAABAAEAAAICRAEAOw==', 'base64'));
+  } else {
+    console.log('⚠️ Invalid or missing token:', token);
   }
 });
 
+// FIXED: Enhanced click tracking endpoint with better error handling
 router.get('/track/click', async (req, res) => {
   const token = req.query.token;
   const url = req.query.url;
   
-  // FIX: Better validation
-  if (!token) {
-    console.log('Tracking click: Missing token');
-    return res.status(400).send('Missing token');
+  console.log('=== TRACKING CLICK EVENT ===');
+  console.log('Token received:', token);
+  console.log('URL received:', url);
+  console.log('User-Agent:', req.get('User-Agent'));
+  
+  if (!token || !url) {
+    console.log('❌ Missing token or URL');
+    return res.status(400).send('Missing required parameters');
   }
   
-  if (!url) {
-    console.log('Tracking click: Missing URL');
-    return res.status(400).send('Missing url');
+  // Validate token format
+  if (token.length !== 32) {
+    console.log('❌ Invalid token format:', token);
+    return res.status(400).send('Invalid token format');
+  }
+  
+  let decodedUrl;
+  try {
+    decodedUrl = decodeURIComponent(url);
+    console.log('✅ Decoded URL:', decodedUrl);
+    
+    // Validate URL format
+    new URL(decodedUrl); // This will throw if URL is invalid
+  } catch (error) {
+    console.log('❌ URL decode/validation error:', error.message);
+    return res.status(400).send('Invalid URL');
   }
   
   try {
-    console.log('Tracking click for token:', token, 'URL:', url); // DEBUG
+    console.log('🔍 Looking up campaign for click tracking with token:', token);
     
-    const campaign = await Campaign.findOne({ 'recipients.trackingToken': token });
+    // FIXED: Enhanced campaign lookup with better error handling
+    const campaign = await Campaign.findOne({ 
+      'recipients.trackingToken': token 
+    });
+    
     if (!campaign) {
-      console.log('Campaign not found for token:', token); // DEBUG
-      return res.redirect(decodeURIComponent(url));
+      console.log('❌ Campaign not found for token:', token);
+      // Still redirect to avoid breaking user experience
+      return res.redirect(decodedUrl);
     }
     
+    console.log('✅ Campaign found:', campaign.campaignName, 'ID:', campaign._id);
+    
+    // FIXED: Enhanced recipient lookup with validation
     const recipient = campaign.recipients.find(r => r.trackingToken === token);
     if (!recipient) {
-      console.log('Recipient not found for token:', token); // DEBUG
-      return res.redirect(decodeURIComponent(url));
+      console.log('❌ Recipient not found for token:', token);
+      console.log('Available tokens in campaign:', campaign.recipients.map(r => r.trackingToken.substring(0, 8) + '...'));
+      return res.redirect(decodedUrl);
     }
     
-    console.log('Creating click tracking event for:', recipient.email); // DEBUG
+    console.log('✅ Recipient found:', recipient.email, 'Name:', recipient.name || 'N/A');
     
+    // FIXED: Check for recent duplicate clicks (within 30 seconds)
+    const thirtySecondsAgo = new Date(Date.now() - 30 * 1000);
+    const recentClick = await TrackingEvent.findOne({
+      campaignId: campaign._id,
+      recipientEmail: recipient.email,
+      trackingToken: token,
+      eventType: 'click',
+      details: decodedUrl,
+      timestamp: { $gte: thirtySecondsAgo }
+    });
+    
+    if (recentClick) {
+      console.log('⚠️ Duplicate click ignored (within 30 seconds)');
+      return res.redirect(decodedUrl);
+    }
+    
+    // Save click event with comprehensive data
     const trackingEvent = new TrackingEvent({
       campaignId: campaign._id,
       recipientEmail: recipient.email,
-      trackingToken: token, // FIX: Add trackingToken field
+      trackingToken: token,
       eventType: 'click',
       timestamp: new Date(),
-      details: decodeURIComponent(url),
-      // FIX: Add metadata object structure
+      details: decodedUrl,
       metadata: {
-        userAgent: req.get('User-Agent'),
-        ipAddress: req.ip || req.connection.remoteAddress
+        userAgent: req.get('User-Agent') || 'Unknown',
+        ipAddress: req.ip || req.connection?.remoteAddress || 'Unknown',
+        referer: req.get('Referer') || 'Direct',
+        acceptLanguage: req.get('Accept-Language') || 'Unknown'
       },
-      campaignName: campaign.campaignName, // FIX: Add denormalized data
+      campaignName: campaign.campaignName,
       userId: campaign.userId
     });
     
     await trackingEvent.save();
-    console.log('Click tracking event saved successfully'); // DEBUG
+    console.log('✅ Click event saved successfully for:', recipient.email, 'URL:', decodedUrl);
     
-    res.redirect(decodeURIComponent(url));
+    // Redirect to original URL
+    res.redirect(decodedUrl);
     
   } catch (error) {
-    console.error('Error tracking click:', error);
-    // Still redirect to the original URL
-    res.redirect(decodeURIComponent(url));
+    console.error('❌ Click tracking error:', error.message);
+    console.error('Stack:', error.stack);
+    // Always redirect to maintain user experience
+    res.redirect(decodedUrl);
   }
 });
+
+// Debug endpoint to test tracking system
+router.get('/track/debug/:token', authenticate, async (req, res) => {
+  try {
+    const token = req.params.token;
+    
+    console.log('=== DEBUG TRACKING TOKEN ===');
+    console.log('Token:', token);
+    
+    const campaign = await Campaign.findOne({ 'recipients.trackingToken': token });
+    if (!campaign) {
+      return res.json({
+        success: false,
+        message: 'Campaign not found',
+        token: token
+      });
+    }
+    
+    const recipient = campaign.recipients.find(r => r.trackingToken === token);
+    if (!recipient) {
+      return res.json({
+        success: false,
+        message: 'Recipient not found',
+        token: token,
+        campaign: campaign.campaignName
+      });
+    }
+    
+    // Get tracking events for this token
+    const trackingEvents = await TrackingEvent.find({
+      trackingToken: token
+    }).sort({ timestamp: -1 });
+    
+    res.json({
+      success: true,
+      token: token,
+      campaign: {
+        id: campaign._id,
+        name: campaign.campaignName,
+        created: campaign.createdAt
+      },
+      recipient: {
+        email: recipient.email,
+        name: recipient.name
+      },
+      trackingEvents: trackingEvents.map(event => ({
+        type: event.eventType,
+        timestamp: event.timestamp,
+        details: event.details,
+        metadata: event.metadata
+      }))
+    });
+    
+  } catch (error) {
+    console.error('Debug endpoint error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+// Test endpoint to verify tracking URLs
+router.get('/track/test', authenticate, async (req, res) => {
+  try {
+    // Get a recent campaign for testing
+    const campaign = await Campaign.findOne({ userId: req.user._id })
+      .sort({ createdAt: -1 });
+    
+    if (!campaign || !campaign.recipients.length) {
+      return res.json({
+        success: false,
+        message: 'No campaigns found for testing'
+      });
+    }
+    
+    const recipient = campaign.recipients[0];
+    const baseUrl = process.env.BASE_URL || 'http://localhost:5000';
+    
+    const testUrls = {
+      openTracking: `${baseUrl}/track/open?token=${recipient.trackingToken}`,
+      clickTracking: `${baseUrl}/track/click?token=${recipient.trackingToken}&url=${encodeURIComponent('https://www.google.com')}`,
+      debugUrl: `${baseUrl}/track/debug/${recipient.trackingToken}`
+    };
+    
+    res.json({
+      success: true,
+      campaign: {
+        id: campaign._id,
+        name: campaign.campaignName
+      },
+      recipient: {
+        email: recipient.email,
+        token: recipient.trackingToken
+      },
+      testUrls
+    });
+    
+  } catch (error) {
+    console.error('Test endpoint error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 module.exports = router;

@@ -309,13 +309,62 @@ router.post("/create-campaign", authenticate, async (req, res) => {
 // Fetch all campaigns
 router.get("/campaigns", authenticate, async (req, res) => {
   try {
-    const campaigns = await Campaign.find({ userId: req.user._id })
+    const { toolType } = req.query; // Get toolType from query parameters
+    
+    // Build filter object
+    const filter = { userId: req.user._id };
+    if (toolType) {
+      filter.toolType = toolType;
+    }
+    
+    const campaigns = await Campaign.find(filter)
       .select("-smtpPassword")
       .sort({ createdAt: -1 });
+    
     res.status(200).json(campaigns);
   } catch (error) {
     console.error("Error in /campaigns:", error.stack);
     res.status(500).json({ error: "Failed to fetch campaigns" });
+  }
+});
+
+// Get all campaigns with basic analytics (with optional filter)
+router.get("/campaigns-with-analytics", authenticate, async (req, res) => {
+  try {
+    const { toolType } = req.query; // Get toolType from query parameters
+    
+    // Build filter object
+    const filter = { userId: req.user._id };
+    if (toolType) {
+      filter.toolType = toolType;
+    }
+    
+    const campaigns = await Campaign.find(filter)
+      .select("-smtpPassword")
+      .sort({ createdAt: -1 });
+
+    const campaignsWithAnalytics = await Promise.all(
+      campaigns.map(async (campaign) => {
+        const trackingData = await EmailTracking.find({ campaignId: campaign._id });
+        const totalEmails = trackingData.length;
+        const openedEmails = trackingData.filter(t => t.opened).length;
+        const openRate = totalEmails > 0 ? ((openedEmails / totalEmails) * 100).toFixed(2) : 0;
+
+        return {
+          ...campaign.toObject(),
+          analytics: {
+            totalEmails,
+            openedEmails,
+            openRate: parseFloat(openRate)
+          }
+        };
+      })
+    );
+
+    res.json(campaignsWithAnalytics);
+  } catch (error) {
+    console.error('Error fetching campaigns with analytics:', error);
+    res.status(500).json({ error: 'Failed to fetch campaigns' });
   }
 });
 
@@ -723,37 +772,7 @@ router.get("/analytics/:campaignId", authenticate, async (req, res) => {
   }
 });
 
-// Get all campaigns with basic analytics
-router.get("/campaigns-with-analytics", authenticate, async (req, res) => {
-  try {
-    const campaigns = await Campaign.find({ userId: req.user._id })
-      .select("-smtpPassword")
-      .sort({ createdAt: -1 });
 
-    const campaignsWithAnalytics = await Promise.all(
-      campaigns.map(async (campaign) => {
-        const trackingData = await EmailTracking.find({ campaignId: campaign._id });
-        const totalEmails = trackingData.length;
-        const openedEmails = trackingData.filter(t => t.opened).length;
-        const openRate = totalEmails > 0 ? ((openedEmails / totalEmails) * 100).toFixed(2) : 0;
-
-        return {
-          ...campaign.toObject(),
-          analytics: {
-            totalEmails,
-            openedEmails,
-            openRate: parseFloat(openRate)
-          }
-        };
-      })
-    );
-
-    res.json(campaignsWithAnalytics);
-  } catch (error) {
-    console.error('Error fetching campaigns with analytics:', error);
-    res.status(500).json({ error: 'Failed to fetch campaigns' });
-  }
-});
 const processLinksForTracking = (htmlContent, campaignId, recipientEmail, trackingId) => {
   const baseUrl = process.env.BASE_URL || 'https://vedive.com:3000';
   let processedContent = htmlContent;

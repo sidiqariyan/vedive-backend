@@ -1,7 +1,7 @@
 const mongoose = require("mongoose");
 
 const recipientSchema = new mongoose.Schema({
-  email: { type: String, required: true },
+  email: { type: String, required: false },
   name: { type: String },
   trackingToken: { type: String, required: true }
 });
