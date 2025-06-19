@@ -3,7 +3,13 @@ const mongoose = require("mongoose");
 const recipientSchema = new mongoose.Schema({
   email: { type: String, required: false },
   name: { type: String },
-  trackingToken: { type: String, required: true }
+  trackingToken: { 
+    type: String, 
+    required: function() {
+      // Only require trackingToken for actual email sending campaigns
+      return this.parent().toolType !== 'email-scraper';
+    }
+  }
 });
 
 const campaignSchema = new mongoose.Schema(

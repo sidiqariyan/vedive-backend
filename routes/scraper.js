@@ -83,37 +83,50 @@ const handleEmailScraper = async (req, res) => {
 
     const emailResults = await Promise.all(emailPromises);
     
-    // Flatten results and handle duplicates while preserving source info
+    // Flatten results and handle duplicates while preserving enhanced data
     const emailMap = new Map();
     emailResults.flat().forEach(item => {
       if (item && item.email) {
-        // If email doesn't exist, add it. If it exists, keep the first source found
+        // If email doesn't exist, add it. If it exists, keep the first one found
         if (!emailMap.has(item.email)) {
-          emailMap.set(item.email, item.source);
+          emailMap.set(item.email, item);
         }
       }
     });
 
-    // Convert back to array of objects
-    const emailsWithSources = Array.from(emailMap.entries()).map(([email, source]) => ({
-      email,
-      source
-    }));
+    // Convert back to array of enhanced email objects
+    const emailsWithEnhancedData = Array.from(emailMap.values());
 
-    if (emailsWithSources.length === 0) {
+    if (emailsWithEnhancedData.length === 0) {
       return res.status(404).json({ message: "No emails found for this query. Try different keywords or parameters." });
     }
 
-    console.log(`Found ${emailsWithSources.length} unique emails for query: "${query}"`);
+    console.log(`Found ${emailsWithEnhancedData.length} unique emails for query: "${query}"`);
 
     // Validate emails before saving
-    const validEmailsWithSources = emailsWithSources.filter(item => validator.isEmail(item.email));
-    if (validEmailsWithSources.length === 0) {
+    const validEmailsWithData = emailsWithEnhancedData.filter(item => validator.isEmail(item.email));
+    if (validEmailsWithData.length === 0) {
       return res.status(404).json({ message: "No valid emails found for this query. Try different keywords or parameters." });
     }
 
-    // Extract just the email addresses for campaign storage (maintaining backward compatibility)
-    const validEmails = validEmailsWithSources.map(item => item.email);
+    // Transform emails to the format expected by Campaign model
+    const recipientsForCampaign = validEmailsWithData.map(item => ({
+      email: item.email,
+      source: item.source || 'unknown',
+      // Add other fields that your Campaign model expects
+      status: 'pending',
+      // If your enhanced scraper returns validation data, include it
+      ...(item.validation && {
+        validationScore: item.validation.validationScore,
+        riskLevel: item.validation.riskLevel,
+        confidence: item.validation.confidence
+      }),
+      // If context is available
+      ...(item.context && { context: item.context }),
+      // Add any other fields from your enhanced scraper
+      foundAt: item.foundAt || new Date().toISOString(),
+      scrapingMethod: item.scrapingMethod || 'HTTP'
+    }));
 
     // Save the campaign
     if (userIdentifier && userIdentifier !== "anonymous") {
@@ -122,7 +135,7 @@ const handleEmailScraper = async (req, res) => {
         campaignName,
         toolType: "email-scraper",
         query,
-        recipients: validEmails,
+        recipients: recipientsForCampaign, // Now it's an array of objects
         status: "completed",
       });
       await newCampaign.save();
@@ -132,7 +145,16 @@ const handleEmailScraper = async (req, res) => {
     }
 
     // Generate CSV file with the valid emails and their sources
-    const csvPath = await generateCSV(validEmailsWithSources);
+    // For CSV, we can use a simplified format
+    const emailsForCSV = validEmailsWithData.map(item => ({
+      email: item.email,
+      source: item.source || 'unknown',
+      validationScore: item.validation?.validationScore || 0,
+      riskLevel: item.validation?.riskLevel || 'unknown',
+      foundAt: item.foundAt || new Date().toISOString()
+    }));
+
+    const csvPath = await generateCSV(emailsForCSV);
     if (!csvPath) {
       return res.status(500).json({ error: "Failed to generate CSV file" });
     }
