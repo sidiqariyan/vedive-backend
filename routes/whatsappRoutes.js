@@ -398,6 +398,39 @@ router.get("/qr", authenticate, async (req, res) => {
   }
 });
 
+// Route to disconnect a WhatsApp account
+router.post("/disconnect-account", authenticate, async (req, res) => {
+  const userId = req.user._id.toString();
+  const { phoneNumber } = req.body;
+
+  try {
+    // Remove from memory
+    if (usersDb[userId]?.accounts[phoneNumber]) {
+      delete usersDb[userId].accounts[phoneNumber];
+    }
+
+    // If this was the current auth, clear it
+    if (usersDb[userId]?.currentAuth === phoneNumber) {
+      usersDb[userId].currentAuth = null;
+    }
+
+    // Update database
+    await WhatsAppAccount.findOneAndUpdate(
+      { userId, phoneNumber },
+      { sessionData: null, lastConnected: new Date() }
+    );
+
+    res.json({ 
+      message: `Disconnected WhatsApp account ${phoneNumber}`,
+      success: true 
+    });
+
+  } catch (error) {
+    console.error("Error disconnecting account:", error);
+    res.status(500).json({ error: "Error disconnecting account" });
+  }
+});
+
 // Route to switch to a specific WhatsApp account
 router.post("/switch-account", authenticate, async (req, res) => {
   const userId = req.user._id.toString();
@@ -786,65 +819,6 @@ router.get("/analytics/account/:phoneNumber", authenticate, async (req, res) => 
   }
 });
 
-// Route to disconnect a specific WhatsApp account
-router.post("/disconnect", authenticate, async (req, res) => {
-  const userId = req.user._id.toString();
-  const { phoneNumber } = req.body;
-
-  try {
-    if (usersDb[userId]?.accounts[phoneNumber]) {
-      const account = usersDb[userId].accounts[phoneNumber];
-      if (account.client) {
-        await account.client.destroy();
-      }
-      delete usersDb[userId].accounts[phoneNumber];
-      
-      if (usersDb[userId].currentAuth === phoneNumber) {
-        usersDb[userId].currentAuth = null;
-      }
-    }
-
-    await WhatsAppAccount.findOneAndUpdate(
-      { userId, phoneNumber },
-      {
-        isAuthenticated: false,
-        lastDisconnected: new Date()
-      }
-    );
-
-    res.json({ message: `WhatsApp account ${phoneNumber} disconnected successfully` });
-
-  } catch (error) {
-    console.error("Error disconnecting account:", error);
-    res.status(500).json({ error: "Error disconnecting account" });
-  }
-});
-
-// Manual sync route for checking message statuses
-router.post("/sync-status", authenticate, async (req, res) => {
-  const userId = req.user._id.toString();
-  const { phoneNumber } = req.body;
-
-  try {
-    if (!usersDb[userId]?.accounts[phoneNumber]?.isAuthenticated) {
-      return res.status(400).json({ 
-        error: `WhatsApp account ${phoneNumber} is not authenticated` 
-      });
-    }
-
-    const client = usersDb[userId].accounts[phoneNumber].client;
-    await checkPendingMessageStatuses(client, phoneNumber, userId);
-    
-    res.json({ 
-      message: `Status sync completed for ${phoneNumber}`,
-      success: true 
-    });
-
-  } catch (error) {
-    console.error("Error in manual sync:", error);
-    res.status(500).json({ error: "Error syncing message statuses" });
-  }
-});
 
 // Cleanup on server shutdown
 process.on('SIGINT', () => {
