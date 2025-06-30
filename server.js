@@ -1,3 +1,4 @@
+// Updated server code with EJS removed
 require("dotenv").config();
 const express = require("express");
 const fs = require("fs");
@@ -15,11 +16,17 @@ const User = require("./models/User");
 // Updated import: using 'searchGoogle' instead of 'searchGoogleMaps'
 const { searchGoogle } = require("./routes/NumberScraper");
 const { checkExpiredSubscriptions } = require("./utils/subscriptionChecker");
+// Email validation import
+const EmailValidator = require('./routes/emailValidator'); // Import the EmailValidator class directly
 
 const app = express();
 
-
-
+// Initialize email validator with faster settings
+const emailValidator = new EmailValidator({
+  timeout: 2500,     // 4 seconds for SMTP timeout
+  retryAttempts: 1,  // Reduced retry attempts for faster response
+  verbose: false
+});
 
 // Ensure the public directory exists
 const publicDir = path.join(__dirname, "public");
@@ -54,6 +61,7 @@ app.use('/uploads', express.static(path.join(__dirname, 'public/uploads'), {
     res.set('Access-Control-Allow-Origin', '*');
   }
 }));
+
 app.use(
   helmet({
     crossOriginResourcePolicy: { policy: "cross-origin" }
@@ -66,12 +74,11 @@ const corsOptions = {
   origin: true, // temporarily allow all origins
   credentials: true,
 };
-
-
 app.use(cors(corsOptions));
 app.options("*", cors(corsOptions));
 
-
+// Middleware
+app.use(express.urlencoded({ extended: true }));
 app.use(express.json({ limit: "1mb" }));
 app.use(express.static(publicDir));
 
@@ -95,9 +102,81 @@ app.use((req, res, next) => {
   });
   next();
 });
+
+// Email Validation Routes - Updated to return JSON responses
+app.get('/email-validation', (req, res) => {
+  res.json({
+    title: 'Email Validator',
+    message: 'Use POST /validate for single email validation or POST /validate-batch for batch validation',
+    endpoints: {
+      singleValidation: 'POST /validate',
+      batchValidation: 'POST /validate-batch',
+      apiValidation: 'POST /api/validate'
+    }
+  });
+});
+
+app.post('/validate', async (req, res) => {
+  const { email } = req.body;
+ 
+  if (!email) {
+    return res.status(400).json({
+      error: 'Please enter an email address',
+      email: '',
+      result: null
+    });
+  }
+
+  try {
+    const result = await emailValidator.validateEmail(email.trim());
+    res.json({
+      result: result,
+      email: email,
+      success: true
+    });
+  } catch (error) {
+    res.status(500).json({
+      error: `Validation failed: ${error.message}`,
+      email: email,
+      result: null
+    });
+  }
+});
+
+app.post('/validate-batch', async (req, res) => {
+  const { emails } = req.body;
+ 
+  if (!emails) {
+    return res.status(400).json({ error: 'Please provide emails' });
+  }
+
+  try {
+    const emailList = emails.split(',').map(email => email.trim()).filter(email => email);
+    const results = await emailValidator.validateBatch(emailList);
+    res.json({ results, success: true });
+  } catch (error) {
+    res.status(500).json({ error: `Batch validation failed: ${error.message}` });
+  }
+});
+
+// API endpoint for single email validation
+app.post('/api/validate', async (req, res) => {
+  const { email } = req.body;
+ 
+  if (!email) {
+    return res.status(400).json({ error: 'Email is required' });
+  }
+
+  try {
+    const result = await emailValidator.validateEmail(email.trim());
+    res.json(result);
+  } catch (error) {
+    res.status(500).json({ error: `Validation failed: ${error.message}` });
+  }
+});
+
 // app.use("/api/admin", require("./routes/adminRoutes"));
 // Mount routes
-
 const couponRoutes = require('./routes/coupon');
 app.use('/api/coupon', couponRoutes);
 
@@ -110,7 +189,6 @@ app.use("/api", require("./routes/scraper"));
 app.use("/api", require("./routes/gmailSender"));
 app.use("/api/posts", require("./routes/PostRoutes"));
 
-
 const cashfreeRoute = require("./routes/cashfreeRoute");
 // Add these to your existing imports
 const SubscriptionPlan = require("./models/SubscriptionPlan");
@@ -121,10 +199,13 @@ app.use("/api/subscription", require("./routes/subscriptionRoute"));
 app.use("/api/payment", require("./routes/cashfreeRoute"));
 app.use("/api/blog", require("./routes/blogRoute"));
 app.use("/api/payment", cashfreeRoute);
+
 const { handleEmailScraper } = require("./routes/scraper");
+
 // Updated Email Scraper Endpoint
 app.use("/", require("./routes/campaignRoutes"));
 const adminRoutes = require("./routes/adminRoutes");
+
 app.post("/api/email-scraper", authenticate, async (req, res) => {
   try {
     const { query, campaignName } = req.body;
@@ -150,8 +231,10 @@ async function saveToCSV(businesses) {
     console.error("No businesses data to save.");
     return null;
   }
+
   const csvFileName = `businesses_${uuidv4()}.csv`;
   const csvFilePath = path.join(publicDir, csvFileName);
+
   const csvWriter = createCsvWriter({
     path: csvFilePath,
     header: [
@@ -166,6 +249,7 @@ async function saveToCSV(businesses) {
       { id: "ratingText", title: "Rating" },
     ],
   });
+
   try {
     await csvWriter.writeRecords(businesses);
     console.log(`The CSV file "${csvFilePath}" was written successfully.`);
@@ -177,6 +261,7 @@ async function saveToCSV(businesses) {
 }
 
 app.use('/uploads', express.static(path.join(__dirname, 'public/uploads')));
+
 // Dashboard Endpoint
 app.get("/api/dashboard", authenticate, async (req, res) => {
   try {
@@ -185,6 +270,7 @@ app.get("/api/dashboard", authenticate, async (req, res) => {
       userId,
       toolType: { $in: ["mail-sender", "gmail-sender"] },
     });
+
     const whatsappMessages = await Campaign.countDocuments({
       userId,
       toolType: "whatsapp-bulk-sender",
@@ -278,6 +364,7 @@ app.get("/api/dashboard", authenticate, async (req, res) => {
     res.status(500).json({ error: "Failed to fetch dashboard data" });
   }
 });
+
 // Health Check Endpoint
 app.get("/health", (req, res) => {
   res.status(200).json({ status: "OK" });
