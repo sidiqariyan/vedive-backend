@@ -539,6 +539,161 @@ class WhatsAppService {
   cleanup() {
     Object.keys(this.usersDb).forEach(userId => this.cleanupUserSession(userId));
   }
+   async safeLogout(client, sessionId) {
+    try {
+      console.log(`Attempting to logout session: ${sessionId}`);
+      await client.logout();
+      console.log(`Session ${sessionId} logged out successfully`);
+      return { success: true };
+    } catch (error) {
+      if (error.message.includes('EBUSY') || 
+          error.message.includes('resource busy') || 
+          error.message.includes('unlink')) {
+        console.warn(`Windows file lock during logout for ${sessionId}:`, error.message);
+        
+        // Schedule a delayed cleanup
+        setTimeout(async () => {
+          await this.delayedCleanup(sessionId);
+        }, 5000);
+        
+        return { 
+          success: true, 
+          warning: 'Session disconnected, cleanup pending' 
+        };
+      }
+      throw error;
+    }
+  }
+
+  // Delayed cleanup for locked files
+  async delayedCleanup(sessionId) {
+    try {
+      const sessionPath = path.join('.wwebjs_auth', `session-${sessionId}`);
+      if (fs.existsSync(sessionPath)) {
+        await fs.promises.rmdir(sessionPath, { recursive: true });
+        console.log(`Delayed cleanup successful for session: ${sessionId}`);
+      }
+    } catch (error) {
+      console.warn(`Delayed cleanup failed for ${sessionId}:`, error.message);
+    }
+  }
+
+  // Enhanced disconnect account method
+  async disconnectAccount(userId, phoneNumber) {
+    const sessionId = this.generateSessionId(userId, phoneNumber);
+    const client = this.clients.get(sessionId);
+
+    if (!client) {
+      throw new Error(`No active session found for ${phoneNumber}`);
+    }
+
+    try {
+      // Use safe logout
+      const logoutResult = await this.safeLogout(client, sessionId);
+      
+      // Remove from active clients
+      this.clients.delete(sessionId);
+      
+      // Update database status
+      await WhatsAppAccount.findOneAndUpdate(
+        { userId, phoneNumber },
+        { 
+          isAuthenticated: false, 
+          lastDisconnected: new Date(),
+          status: 'disconnected'
+        }
+      );
+
+      return {
+        success: true,
+        message: `Account ${phoneNumber} disconnected successfully`,
+        warning: logoutResult.warning
+      };
+
+    } catch (error) {
+      console.error(`Error disconnecting ${phoneNumber}:`, error);
+      
+      // Even if logout fails, remove from active clients and update DB
+      this.clients.delete(sessionId);
+      
+      try {
+        await WhatsAppAccount.findOneAndUpdate(
+          { userId, phoneNumber },
+          { 
+            isAuthenticated: false, 
+            lastDisconnected: new Date(),
+            status: 'disconnected'
+          }
+        );
+      } catch (dbError) {
+        console.error('Database update failed:', dbError);
+      }
+
+      throw error;
+    }
+  }
+
+  // Enhanced remove account method
+  async removeAccount(userId, phoneNumber) {
+    const sessionId = this.generateSessionId(userId, phoneNumber);
+    
+    try {
+      // First try to disconnect if connected
+      const client = this.clients.get(sessionId);
+      if (client) {
+        try {
+          await this.safeLogout(client, sessionId);
+        } catch (error) {
+          console.warn('Logout failed during removal, continuing:', error.message);
+        }
+        this.clients.delete(sessionId);
+      }
+
+      // Remove from database
+      const result = await WhatsAppAccount.findOneAndDelete({ userId, phoneNumber });
+      
+      if (!result) {
+        throw new Error(`Account ${phoneNumber} not found`);
+      }
+
+      return {
+        success: true,
+        message: `Account ${phoneNumber} removed successfully`
+      };
+
+    } catch (error) {
+      console.error(`Error removing account ${phoneNumber}:`, error);
+      throw error;
+    }
+  }
+
+  // Enhanced cleanup method for graceful shutdown
+  async cleanup() {
+    console.log('Starting WhatsApp service cleanup...');
+    const cleanupPromises = [];
+
+    for (const [sessionId, client] of this.clients.entries()) {
+      cleanupPromises.push(
+        this.safeLogout(client, sessionId).catch(error => {
+          console.warn(`Cleanup failed for ${sessionId}:`, error.message);
+        })
+      );
+    }
+
+    try {
+      // Wait for all cleanups to complete or timeout
+      await Promise.allSettled(cleanupPromises);
+      this.clients.clear();
+      console.log('WhatsApp service cleanup completed');
+    } catch (error) {
+      console.warn('Some cleanup operations failed:', error.message);
+    }
+  }
+
+  // Add this helper method if not already present
+  generateSessionId(userId, phoneNumber) {
+    return `${userId}_${Date.now()}_${Math.random().toString(36).substring(7)}`;
+  }
 }
 
 module.exports = WhatsAppService;
