@@ -1,14 +1,18 @@
-// emailValidator.js
+// emailValidator.js - Improved version with better SMTP handling
 const dns = require('dns').promises;
 const net = require('net');
 const os = require('os');
 
 class EmailValidator {
   constructor(options = {}) {
-    this.timeout = options.timeout || 2500; // Reduced to 4 seconds default
-    this.retryAttempts = options.retryAttempts || 1; // Reduced retry attempts for faster response
+    this.timeout = options.timeout || 10000; // Increased timeout to 10 seconds
+    this.retryAttempts = options.retryAttempts || 2; // Increased retries
     this.fromEmail = options.fromEmail || 'test@example.com';
     this.verbose = options.verbose || false;
+    
+    // More conservative SMTP validation approach
+    this.skipSMTPValidation = options.skipSMTPValidation || false;
+    this.treatGreylistingAsValid = options.treatGreylistingAsValid || true;
     
     // Known disposable email domains
     this.disposableDomains = new Set([
@@ -39,7 +43,7 @@ class EmailValidator {
         syntax: { passed: false, message: '' },
         domain: { passed: false, message: '' },
         mx: { passed: false, message: '', records: [] },
-        smtp: { passed: false, message: '', response: '' },
+        smtp: { passed: false, message: '', response: '', skipped: false },
         disposable: { passed: true, message: '' },
         roleBased: { passed: true, message: '' }
       },
@@ -63,7 +67,7 @@ class EmailValidator {
       // 2. Domain validation with timeout
       const domainResult = await this.withTimeout(
         this.validateDomain(domain),
-        2000, // 2 second timeout for domain lookup
+        5000, // 5 second timeout for domain lookup
         'Domain lookup timeout'
       );
       result.checks.domain = domainResult;
@@ -75,7 +79,7 @@ class EmailValidator {
       // 3. MX record validation with timeout
       const mxResult = await this.withTimeout(
         this.validateMX(domain),
-        2000, // 2 second timeout for MX lookup
+        5000, // 5 second timeout for MX lookup
         'MX record lookup timeout'
       );
       result.checks.mx = mxResult;
@@ -84,13 +88,22 @@ class EmailValidator {
         return result;
       }
 
-      // 4. SMTP validation with strict timeout
-      const smtpResult = await this.withTimeout(
-        this.validateSMTP(email, mxResult.records),
-        this.timeout, // Use the configured timeout (4 seconds)
-        'SMTP validation timeout'
-      );
-      result.checks.smtp = smtpResult;
+      // 4. SMTP validation with improved handling
+      if (this.skipSMTPValidation) {
+        result.checks.smtp = {
+          passed: true,
+          message: 'SMTP validation skipped',
+          response: '',
+          skipped: true
+        };
+      } else {
+        const smtpResult = await this.withTimeout(
+          this.validateSMTP(email, mxResult.records),
+          this.timeout,
+          'SMTP validation timeout'
+        );
+        result.checks.smtp = smtpResult;
+      }
 
       // 5. Disposable email check
       const disposableResult = this.checkDisposable(domain);
@@ -100,11 +113,11 @@ class EmailValidator {
       const roleBasedResult = this.checkRoleBased(localPart);
       result.checks.roleBased = roleBasedResult;
 
-      // Determine overall validity
+      // Determine overall validity - more lenient approach
       result.isValid = result.checks.syntax.passed && 
                       result.checks.domain.passed && 
                       result.checks.mx.passed && 
-                      result.checks.smtp.passed;
+                      (result.checks.smtp.passed || result.checks.smtp.skipped);
 
       result.executionTime = Date.now() - startTime;
       this.log(`Validation completed in ${result.executionTime}ms`);
@@ -143,31 +156,47 @@ class EmailValidator {
     if (!email || typeof email !== 'string') {
       return { passed: false, message: 'Email is required and must be a string' };
     }
+    
     email = email.trim();
+    
+    if (email.length === 0) {
+      return { passed: false, message: 'Email cannot be empty' };
+    }
+    
     const atSymbols = (email.match(/@/g) || []).length;
     if (atSymbols !== 1) {
       return { passed: false, message: 'Email must contain exactly one @ symbol' };
     }
+    
     const [localPart, domain] = email.split('@');
+    
     if (!localPart || localPart.length === 0 || localPart.length > 64) {
       return { passed: false, message: 'Local part must be 1-64 characters' };
     }
+    
     if (!domain || domain.length === 0 || domain.length > 253) {
       return { passed: false, message: 'Domain part must be 1-253 characters' };
     }
+    
+    // More permissive regex that handles international domains better
     const emailRegex = /^[a-zA-Z0-9.!#$%&'*+/=?^_`{|}~-]+@[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9](?:[a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*$/;
+    
     if (!emailRegex.test(email)) {
       return { passed: false, message: 'Email format is invalid according to RFC 5322' };
     }
+    
     if (localPart.startsWith('.') || localPart.endsWith('.')) {
       return { passed: false, message: 'Local part cannot start or end with a period' };
     }
+    
     if (localPart.includes('..')) {
       return { passed: false, message: 'Local part cannot contain consecutive periods' };
     }
+    
     if (domain.startsWith('-') || domain.endsWith('-')) {
       return { passed: false, message: 'Domain cannot start or end with a hyphen' };
     }
+    
     return { passed: true, message: 'Email syntax is valid' };
   }
 
@@ -193,6 +222,7 @@ class EmailValidator {
           records: []
         };
       }
+      
       const sortedRecords = mxRecords.sort((a, b) => a.priority - b.priority);
       return {
         passed: true,
@@ -209,28 +239,78 @@ class EmailValidator {
   }
 
   async validateSMTP(email, mxRecords) {
+    let lastError = null;
+    
     for (let attempt = 0; attempt < this.retryAttempts; attempt++) {
-      for (const mx of mxRecords) {
+      for (const mx of mxRecords.slice(0, 3)) { // Only try first 3 MX records
         try {
           this.log(`SMTP attempt ${attempt + 1} for ${mx.exchange}`);
           const result = await this.performSMTPCheck(email, mx.exchange);
+          
+          // Consider these as "passed" or acceptable
           if (result.passed) {
             return result;
           }
+          
+          // Handle greylisting as valid if configured to do so
+          if (this.treatGreylistingAsValid && this.isGreylisting(result.message)) {
+            return {
+              passed: true,
+              message: `Email accepted (greylisting detected): ${result.message}`,
+              response: result.response
+            };
+          }
+          
+          // If we get a definitive rejection, don't try other servers
+          if (this.isDefinitiveRejection(result.message)) {
+            return result;
+          }
+          
+          lastError = result;
+          
         } catch (error) {
           this.log(`SMTP check failed for ${mx.exchange}: ${error.message}`);
+          lastError = {
+            passed: false,
+            message: `SMTP error: ${error.message}`,
+            response: ''
+          };
           continue;
         }
       }
+      
       if (attempt < this.retryAttempts - 1) {
-        await this.sleep(1000); // Reduced sleep time
+        await this.sleep(1000); // Longer delay between attempts
       }
     }
-    return {
+    
+    // If we couldn't get a definitive answer, be more lenient
+    return lastError || {
       passed: false,
       message: 'SMTP validation failed for all MX servers after retries',
       response: ''
     };
+  }
+
+  isGreylisting(message) {
+    const greylistingIndicators = [
+      'greylisted', 'greylist', 'try again later', 'temporary failure',
+      'deferred', 'rate limit', 'throttl', '450', '451', '452'
+    ];
+    
+    const lowerMessage = message.toLowerCase();
+    return greylistingIndicators.some(indicator => lowerMessage.includes(indicator));
+  }
+
+  isDefinitiveRejection(message) {
+    const rejectionIndicators = [
+      'user unknown', 'mailbox unavailable', 'address not found',
+      'recipient not found', 'no such user', 'invalid recipient',
+      '550', '551', '553'
+    ];
+    
+    const lowerMessage = message.toLowerCase();
+    return rejectionIndicators.some(indicator => lowerMessage.includes(indicator));
   }
 
   async performSMTPCheck(email, mxServer) {
@@ -238,103 +318,143 @@ class EmailValidator {
       const socket = new net.Socket();
       let response = '';
       let step = 0;
+      let resolved = false;
       
-      // Set socket timeout
-      socket.setTimeout(this.timeout);
-      
-      const timeout = setTimeout(() => {
-        socket.destroy();
-        reject(new Error('SMTP connection timeout'));
-      }, this.timeout);
-
-      const cleanup = () => {
-        clearTimeout(timeout);
-        if (!socket.destroyed) {
-          socket.destroy();
+      const resolveOnce = (result) => {
+        if (!resolved) {
+          resolved = true;
+          resolve(result);
         }
       };
 
+      const rejectOnce = (error) => {
+        if (!resolved) {
+          resolved = true;
+          reject(error);
+        }
+      };
+
+      // Set socket timeout
+      socket.setTimeout(this.timeout);
+
+      // Set up timeout handling
+      const connectionTimeout = setTimeout(() => {
+        if (!resolved) {
+          this.log(`Connection timeout for ${mxServer}`);
+          socket.destroy();
+          resolveOnce({
+            passed: false,
+            message: `Connection timeout to ${mxServer}`,
+            response: response.trim()
+          });
+        }
+      }, this.timeout);
+
+      const cleanup = () => {
+        clearTimeout(connectionTimeout);
+        if (!socket.destroyed) {
+          socket.end();
+          setTimeout(() => {
+            if (!socket.destroyed) {
+              socket.destroy();
+            }
+          }, 200);
+        }
+      };
+
+      // Connection handling
       socket.connect(25, mxServer, () => {
         this.log(`Connected to ${mxServer}:25`);
       });
 
-      socket.on('timeout', () => {
-        cleanup();
-        reject(new Error('SMTP socket timeout'));
-      });
-
       socket.on('data', (data) => {
+        if (resolved) return;
+
         const message = data.toString().trim();
         response += message + '\n';
-        this.log(`SMTP Response: ${message}`);
-        const code = parseInt(message.substr(0, 3));
+        this.log(`SMTP Response (step ${step}): ${message}`);
+        
+        // Handle multi-line responses
+        const lines = message.split('\r\n').filter(line => line.length > 0);
+        const lastLine = lines[lines.length - 1];
+        const code = parseInt(lastLine.substring(0, 3));
+        
+        // Check if this is the end of a multi-line response
+        if (lastLine.length > 3 && lastLine[3] === '-') {
+          return;
+        }
         
         try {
           switch (step) {
-            case 0:
+            case 0: // Server greeting
               if (code === 220) {
                 socket.write(`HELO ${os.hostname()}\r\n`);
                 step++;
               } else {
                 cleanup();
-                resolve({
+                resolveOnce({
                   passed: false,
-                  message: `Connection rejected: ${message}`,
+                  message: `Connection rejected: ${lastLine}`,
                   response: response.trim()
                 });
               }
               break;
-            case 1:
+              
+            case 1: // HELO response
               if (code === 250) {
                 socket.write(`MAIL FROM:<${this.fromEmail}>\r\n`);
                 step++;
               } else {
                 cleanup();
-                resolve({
+                resolveOnce({
                   passed: false,
-                  message: `HELO rejected: ${message}`,
+                  message: `HELO rejected: ${lastLine}`,
                   response: response.trim()
                 });
               }
               break;
-            case 2:
+              
+            case 2: // MAIL FROM response
               if (code === 250) {
                 socket.write(`RCPT TO:<${email}>\r\n`);
                 step++;
               } else {
                 cleanup();
-                resolve({
+                resolveOnce({
                   passed: false,
-                  message: `MAIL FROM rejected: ${message}`,
+                  message: `MAIL FROM rejected: ${lastLine}`,
                   response: response.trim()
                 });
               }
               break;
-            case 3:
-              cleanup();
+              
+            case 3: // RCPT TO response - this is what we care about
               socket.write('QUIT\r\n');
+              cleanup();
+              
               if (code === 250) {
-                resolve({
+                resolveOnce({
                   passed: true,
                   message: 'Email address accepted by SMTP server',
                   response: response.trim()
                 });
               } else if (code === 550 || code === 551 || code === 553) {
-                resolve({
+                resolveOnce({
                   passed: false,
-                  message: `Email address rejected: ${message}`,
+                  message: `Email address rejected: ${lastLine}`,
                   response: response.trim()
                 });
               } else if (code === 450 || code === 451 || code === 452) {
-                resolve({
-                  passed: false,
-                  message: `Temporary failure (possible greylisting): ${message}`,
+                // Treat temporary failures more leniently
+                resolveOnce({
+                  passed: this.treatGreylistingAsValid,
+                  message: `Temporary failure (greylisting/rate limiting): ${lastLine}`,
                   response: response.trim()
                 });
               } else {
-                resolve({
+                resolveOnce({
                   passed: false,
-                  message: `Unexpected response: ${message}`,
+                  message: `Unexpected response: ${lastLine}`,
                   response: response.trim()
                 });
               }
@@ -342,21 +462,58 @@ class EmailValidator {
           }
         } catch (error) {
           cleanup();
-          resolve({
+          resolveOnce({
             passed: false,
-            message: error.message,
+            message: `Protocol error: ${error.message}`,
             response: response.trim()
           });
         }
       });
 
       socket.on('error', (error) => {
+        this.log(`SMTP socket error for ${mxServer}: ${error.message}`);
         cleanup();
-        reject(error);
+        if (!resolved) {
+          resolveOnce({
+            passed: false,
+            message: `Connection error: ${error.message}`,
+            response: response.trim()
+          });
+        }
       });
 
-      socket.on('close', () => {
+      socket.on('timeout', () => {
+        this.log(`SMTP socket timeout for ${mxServer}`);
         cleanup();
+        if (!resolved) {
+          resolveOnce({
+            passed: false,
+            message: `Socket timeout for ${mxServer}`,
+            response: response.trim()
+          });
+        }
+      });
+
+      socket.on('close', (hadError) => {
+        cleanup();
+        if (!resolved) {
+          resolveOnce({
+            passed: false,
+            message: hadError ? 'Connection closed with error' : 'Connection closed unexpectedly',
+            response: response.trim()
+          });
+        }
+      });
+
+      socket.on('end', () => {
+        cleanup();
+        if (!resolved) {
+          resolveOnce({
+            passed: false,
+            message: 'Connection ended by server',
+            response: response.trim()
+          });
+        }
       });
     });
   }
@@ -412,3 +569,29 @@ class EmailValidator {
 }
 
 module.exports = EmailValidator;
+
+// Example usage with different configurations:
+/*
+// More lenient validation (recommended for most use cases)
+const validator = new EmailValidator({
+  verbose: true,
+  timeout: 10000,
+  retryAttempts: 2,
+  treatGreylistingAsValid: true,
+  fromEmail: 'noreply@yourdomain.com' // Use your actual domain
+});
+
+// Skip SMTP validation entirely (fastest)
+const quickValidator = new EmailValidator({
+  skipSMTPValidation: true,
+  verbose: true
+});
+
+// Strict validation (may have false negatives)
+const strictValidator = new EmailValidator({
+  verbose: true,
+  timeout: 15000,
+  retryAttempts: 3,
+  treatGreylistingAsValid: false
+});
+*/

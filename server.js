@@ -22,11 +22,11 @@ const EmailValidator = require('./routes/emailValidator'); // Import the EmailVa
 const app = express();
 
 // Initialize email validator with faster settings
-const emailValidator = new EmailValidator({
-  timeout: 2500,     // 4 seconds for SMTP timeout
-  retryAttempts: 1,  // Reduced retry attempts for faster response
-  verbose: false
-});
+// const emailValidator = new EmailValidator({
+//   timeout: 2500,     // 4 seconds for SMTP timeout
+//   retryAttempts: 1,  // Reduced retry attempts for faster response
+//   verbose: false
+// });
 
 // Ensure the public directory exists
 const publicDir = path.join(__dirname, "public");
@@ -104,6 +104,8 @@ app.use((req, res, next) => {
 });
 
 // Email Validation Routes - Updated to return JSON responses
+// Updated Email Validation Routes with improved reliability
+// Email Validation Routes - Updated with SMTP-based validation logic
 app.get('/email-validation', (req, res) => {
   res.json({
     title: 'Email Validator',
@@ -111,9 +113,549 @@ app.get('/email-validation', (req, res) => {
     endpoints: {
       singleValidation: 'POST /validate',
       batchValidation: 'POST /validate-batch',
-      apiValidation: 'POST /api/validate'
+      apiValidation: 'POST /api/validate',
+      quickValidation: 'POST /api/validate-quick'
     }
   });
+});
+
+// Initialize EmailValidator with proper settings
+const emailValidator = new EmailValidator({
+  timeout: 8000,
+  retryAttempts: 1,
+  verbose: false,
+  skipSMTPValidation: false,
+  treatGreylistingAsValid: false, // Changed to false for stricter SMTP validation
+  fromEmail: 'test@example.com'
+});
+
+// Single email validation endpoint
+app.post('/validate', async (req, res) => {
+  const { email } = req.body;
+ 
+  if (!email) {
+    return res.status(400).json({
+      error: 'Please enter an email address',
+      email: '',
+      result: null
+    });
+  }
+
+  try {
+    const result = await emailValidator.validateEmail(email.trim());
+    
+    // Apply strict SMTP-based validation
+    const enhancedResult = {
+      ...result,
+      isValid: determineValidityStrict(result),
+      confidence: calculateConfidenceStrict(result),
+      validationType: 'full'
+    };
+    
+    res.json({
+      result: enhancedResult,
+      email: email,
+      success: true
+    });
+  } catch (error) {
+    console.error('Email validation error:', error);
+    res.status(500).json({
+      error: `Validation failed: ${error.message}`,
+      email: email,
+      result: {
+        isValid: false,
+        confidence: 0,
+        error: error.message,
+        checks: {
+          syntax: { passed: false, message: 'Validation error' },
+          domain: { passed: false, message: 'Validation error' },
+          mx: { passed: false, message: 'Validation error' },
+          smtp: { passed: false, message: 'Validation error' }
+        }
+      }
+    });
+  }
+});
+
+// Batch email validation endpoint
+app.post('/validate-batch', async (req, res) => {
+  const { emails } = req.body;
+ 
+  if (!emails) {
+    return res.status(400).json({ error: 'Please provide emails' });
+  }
+
+  try {
+    const emailList = emails.split(',').map(email => email.trim()).filter(email => email);
+    
+    if (emailList.length === 0) {
+      return res.status(400).json({ error: 'No valid emails provided' });
+    }
+
+    const results = [];
+    for (const email of emailList) {
+      try {
+        const result = await emailValidator.validateEmail(email);
+        const enhancedResult = {
+          ...result,
+          isValid: determineValidityStrict(result),
+          confidence: calculateConfidenceStrict(result),
+          validationType: 'full'
+        };
+        results.push(enhancedResult);
+      } catch (error) {
+        console.error(`Error validating ${email}:`, error);
+        results.push({
+          email: email,
+          isValid: false,
+          error: error.message,
+          confidence: 0,
+          validationType: 'error',
+          checks: {
+            syntax: { passed: false, message: 'Validation error' },
+            domain: { passed: false, message: 'Validation error' },
+            mx: { passed: false, message: 'Validation error' },
+            smtp: { passed: false, message: 'Validation error' }
+          }
+        });
+      }
+    }
+    
+    res.json({ results, success: true });
+  } catch (error) {
+    console.error('Batch validation error:', error);
+    res.status(500).json({ error: `Batch validation failed: ${error.message}` });
+  }
+});
+
+// API endpoint for single email validation
+app.post('/api/validate', async (req, res) => {
+  const { email } = req.body;
+ 
+  if (!email) {
+    return res.status(400).json({ error: 'Email is required' });
+  }
+
+  try {
+    const result = await emailValidator.validateEmail(email.trim());
+    const enhancedResult = {
+      ...result,
+      isValid: determineValidityStrict(result),
+      confidence: calculateConfidenceStrict(result),
+      validationType: 'full'
+    };
+    
+    res.json(enhancedResult);
+  } catch (error) {
+    console.error('API validation error:', error);
+    res.status(500).json({ 
+      error: `Validation failed: ${error.message}`,
+      isValid: false,
+      confidence: 0,
+      validationType: 'error'
+    });
+  }
+});
+
+// Quick validation endpoint that skips SMTP entirely
+app.post('/api/validate-quick', async (req, res) => {
+  const { email } = req.body;
+ 
+  if (!email) {
+    return res.status(400).json({ error: 'Email is required' });
+  }
+
+  try {
+    // Create a quick validator that skips SMTP
+    const quickValidator = new EmailValidator({
+      skipSMTPValidation: true,
+      verbose: false
+    });
+    
+    const result = await quickValidator.validateEmail(email.trim());
+    
+    res.json({
+      ...result,
+      confidence: result.isValid ? 75 : 0, // Lower confidence for quick validation
+      validationType: 'quick'
+    });
+  } catch (error) {
+    console.error('Quick validation error:', error);
+    res.status(500).json({ 
+      error: `Quick validation failed: ${error.message}`,
+      isValid: false,
+      confidence: 0,
+      validationType: 'error'
+    });
+  }
+});
+
+// Strict validation function - SMTP must pass for email to be valid
+function determineValidityStrict(result) {
+  const { checks } = result;
+  
+  // Must pass syntax check
+  if (!checks.syntax.passed) {
+    return false;
+  }
+  
+  // Must pass domain check
+  if (!checks.domain.passed) {
+    return false;
+  }
+  
+  // Must pass MX records check
+  if (!checks.mx.passed) {
+    return false;
+  }
+  
+  // SMTP check is critical - if it was skipped, consider invalid
+  if (checks.smtp.skipped) {
+    return false;
+  }
+  
+  // SMTP must pass for email to be considered valid
+  if (!checks.smtp.passed) {
+    return false;
+  }
+  
+  return true;
+}
+
+// Strict confidence calculation
+function calculateConfidenceStrict(result) {
+  const { checks } = result;
+  let confidence = 0;
+  
+  // Syntax check (20%)
+  if (checks.syntax.passed) confidence += 20;
+  
+  // Domain check (20%)
+  if (checks.domain.passed) confidence += 20;
+  
+  // MX check (25%)
+  if (checks.mx.passed) confidence += 25;
+  
+  // SMTP check (35% - most important)
+  if (checks.smtp.skipped) {
+    confidence += 0; // No confidence if SMTP was skipped
+  } else if (checks.smtp.passed) {
+    confidence += 35;
+  } else {
+    confidence += 0; // No confidence if SMTP failed
+  }
+  
+  return Math.min(confidence, 100);
+}
+
+// Alternative lenient validation function (for backward compatibility)
+function determineValidityLenient(result) {
+  const { checks } = result;
+  
+  // Must pass syntax and domain checks
+  if (!checks.syntax.passed || !checks.domain.passed) {
+    return false;
+  }
+  
+  // If MX records don't exist, it's invalid
+  if (!checks.mx.passed) {
+    return false;
+  }
+  
+  // For SMTP validation, be more lenient
+  if (checks.smtp.skipped) {
+    return true; // If SMTP was skipped, consider valid if other checks pass
+  }
+  
+  // If SMTP check failed due to timeout or connection issues, still consider valid
+  if (!checks.smtp.passed) {
+    const smtpMessage = checks.smtp.message.toLowerCase();
+    
+    // These are definitive rejections - mark as invalid
+    const definitiveRejections = [
+      'user unknown',
+      'mailbox unavailable', 
+      'address not found',
+      'recipient not found',
+      'no such user',
+      'invalid recipient',
+      'mailbox does not exist'
+    ];
+    
+    const isDefinitiveRejection = definitiveRejections.some(rejection => 
+      smtpMessage.includes(rejection)
+    );
+    
+    if (isDefinitiveRejection) {
+      return false;
+    }
+    
+    // For all other SMTP failures (timeouts, connection issues, etc.), 
+    // consider the email valid if syntax, domain, and MX checks passed
+    return true;
+  }
+  
+  return checks.smtp.passed;
+}
+
+// Lenient confidence calculation (for backward compatibility)
+function calculateConfidenceLenient(result) {
+  const { checks } = result;
+  let confidence = 0;
+  
+  if (checks.syntax.passed) confidence += 25;
+  if (checks.domain.passed) confidence += 25;
+  if (checks.mx.passed) confidence += 25;
+  
+  if (checks.smtp.skipped) {
+    confidence += 15; // Partial confidence when SMTP is skipped
+  } else if (checks.smtp.passed) {
+    confidence += 25;
+  } else {
+    // Analyze SMTP failure type
+    const smtpMessage = checks.smtp.message.toLowerCase();
+    const definitiveRejections = [
+      'user unknown', 'mailbox unavailable', 'address not found',
+      'recipient not found', 'no such user', 'invalid recipient'
+    ];
+    
+    const isDefinitiveRejection = definitiveRejections.some(rejection => 
+      smtpMessage.includes(rejection)
+    );
+    
+    if (!isDefinitiveRejection) {
+      confidence += 10; // Some confidence even with SMTP failure if not definitive
+    }
+  }
+  
+  return Math.min(confidence, 100);
+}
+
+app.post('/validate', async (req, res) => {
+  const { email } = req.body;
+ 
+  if (!email) {
+    return res.status(400).json({
+      error: 'Please enter an email address',
+      email: '',
+      result: null
+    });
+  }
+
+  try {
+    const result = await emailValidator.validateEmail(email.trim());
+    
+    // Enhanced validation logic - be more lenient with results
+    const enhancedResult = {
+      ...result,
+      isValid: determineValidityWithLeniency(result),
+      confidence: calculateConfidence(result)
+    };
+    
+    res.json({
+      result: enhancedResult,
+      email: email,
+      success: true
+    });
+  } catch (error) {
+    console.error('Email validation error:', error);
+    res.status(500).json({
+      error: `Validation failed: ${error.message}`,
+      email: email,
+      result: null
+    });
+  }
+});
+
+app.post('/validate-batch', async (req, res) => {
+  const { emails } = req.body;
+ 
+  if (!emails) {
+    return res.status(400).json({ error: 'Please provide emails' });
+  }
+
+  try {
+    const emailList = emails.split(',').map(email => email.trim()).filter(email => email);
+    
+    if (emailList.length === 0) {
+      return res.status(400).json({ error: 'No valid emails provided' });
+    }
+
+    // Process emails with better error handling
+    const results = [];
+    for (const email of emailList) {
+      try {
+        const result = await emailValidator.validateEmail(email);
+        const enhancedResult = {
+          ...result,
+          isValid: determineValidityWithLeniency(result),
+          confidence: calculateConfidence(result)
+        };
+        results.push(enhancedResult);
+      } catch (error) {
+        console.error(`Error validating ${email}:`, error);
+        results.push({
+          email: email,
+          isValid: false,
+          error: error.message,
+          confidence: 0,
+          checks: {
+            syntax: { passed: false, message: 'Validation error' },
+            domain: { passed: false, message: 'Validation error' },
+            mx: { passed: false, message: 'Validation error' },
+            smtp: { passed: false, message: 'Validation error' }
+          }
+        });
+      }
+    }
+    
+    res.json({ results, success: true });
+  } catch (error) {
+    console.error('Batch validation error:', error);
+    res.status(500).json({ error: `Batch validation failed: ${error.message}` });
+  }
+});
+
+// API endpoint for single email validation
+app.post('/api/validate', async (req, res) => {
+  const { email } = req.body;
+ 
+  if (!email) {
+    return res.status(400).json({ error: 'Email is required' });
+  }
+
+  try {
+    const result = await emailValidator.validateEmail(email.trim());
+    const enhancedResult = {
+      ...result,
+      isValid: determineValidityWithLeniency(result),
+      confidence: calculateConfidence(result)
+    };
+    
+    res.json(enhancedResult);
+  } catch (error) {
+    console.error('API validation error:', error);
+    res.status(500).json({ 
+      error: `Validation failed: ${error.message}`,
+      isValid: false,
+      confidence: 0
+    });
+  }
+});
+
+// Helper function to determine validity with more leniency
+function determineValidityWithLeniency(result) {
+  const { checks } = result;
+  
+  // Must pass syntax and domain checks
+  if (!checks.syntax.passed || !checks.domain.passed) {
+    return false;
+  }
+  
+  // If MX records don't exist, it's invalid
+  if (!checks.mx.passed) {
+    return false;
+  }
+  
+  // For SMTP validation, be more lenient
+  if (checks.smtp.skipped) {
+    return true; // If SMTP was skipped, consider valid if other checks pass
+  }
+  
+  // If SMTP check failed due to timeout or connection issues, still consider valid
+  if (!checks.smtp.passed) {
+    const smtpMessage = checks.smtp.message.toLowerCase();
+    
+    // These are definitive rejections - mark as invalid
+    const definitiveRejections = [
+      'user unknown',
+      'mailbox unavailable', 
+      'address not found',
+      'recipient not found',
+      'no such user',
+      'invalid recipient',
+      'mailbox does not exist'
+    ];
+    
+    const isDefinitiveRejection = definitiveRejections.some(rejection => 
+      smtpMessage.includes(rejection)
+    );
+    
+    if (isDefinitiveRejection) {
+      return false;
+    }
+    
+    // For all other SMTP failures (timeouts, connection issues, etc.), 
+    // consider the email valid if syntax, domain, and MX checks passed
+    return true;
+  }
+  
+  return checks.smtp.passed;
+}
+
+// Helper function to calculate confidence score
+function calculateConfidence(result) {
+  const { checks } = result;
+  let confidence = 0;
+  
+  if (checks.syntax.passed) confidence += 25;
+  if (checks.domain.passed) confidence += 25;
+  if (checks.mx.passed) confidence += 25;
+  
+  if (checks.smtp.skipped) {
+    confidence += 15; // Partial confidence when SMTP is skipped
+  } else if (checks.smtp.passed) {
+    confidence += 25;
+  } else {
+    // Analyze SMTP failure type
+    const smtpMessage = checks.smtp.message.toLowerCase();
+    const definitiveRejections = [
+      'user unknown', 'mailbox unavailable', 'address not found',
+      'recipient not found', 'no such user', 'invalid recipient'
+    ];
+    
+    const isDefinitiveRejection = definitiveRejections.some(rejection => 
+      smtpMessage.includes(rejection)
+    );
+    
+    if (!isDefinitiveRejection) {
+      confidence += 10; // Some confidence even with SMTP failure if not definitive
+    }
+  }
+  
+  return Math.min(confidence, 100);
+}
+
+// Alternative quick validation endpoint that skips SMTP entirely
+app.post('/api/validate-quick', async (req, res) => {
+  const { email } = req.body;
+ 
+  if (!email) {
+    return res.status(400).json({ error: 'Email is required' });
+  }
+
+  try {
+    // Create a quick validator that skips SMTP
+    const quickValidator = new EmailValidator({
+      skipSMTPValidation: true,
+      verbose: false
+    });
+    
+    const result = await quickValidator.validateEmail(email.trim());
+    
+    res.json({
+      ...result,
+      confidence: result.isValid ? 85 : 0, // High confidence for quick validation
+      validationType: 'quick' // Indicate this was a quick validation
+    });
+  } catch (error) {
+    console.error('Quick validation error:', error);
+    res.status(500).json({ 
+      error: `Quick validation failed: ${error.message}`,
+      isValid: false,
+      confidence: 0
+    });
+  }
 });
 
 app.post('/validate', async (req, res) => {

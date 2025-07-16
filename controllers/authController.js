@@ -18,11 +18,54 @@ const generateToken = (payload, expiresIn = "1h") => {
  */
 exports.register = async (req, res) => {
   try {
-    const { name, username, email, password } = req.body;
+    const { name, username, email, password, companyName, country, industry } = req.body;
 
-    // Validate required fields
-    if (!name || !username || !email || !password) {
-      return res.status(400).json({ error: "All fields are required" });
+    // Validate required fields - UPDATED to include new fields
+    if (!name || !username || !email || !password || !companyName || !country || !industry) {
+      return res.status(400).json({ 
+        error: "All fields are required", 
+        required: ["name", "username", "email", "password", "companyName", "country", "industry"]
+      });
+    }
+
+    // Validate field lengths
+    if (companyName.length > 100) {
+      return res.status(400).json({ error: "Company name must be less than 100 characters" });
+    }
+    if (country.length > 60) {
+      return res.status(400).json({ error: "Country name must be less than 60 characters" });
+    }
+    if (industry.length > 50) {
+      return res.status(400).json({ error: "Industry must be less than 50 characters" });
+    }
+
+    // Validate industry against predefined list (optional but recommended)
+    const validIndustries = [
+      'Technology', 'Healthcare', 'Finance', 'Education', 'Retail', 'Manufacturing',
+      'Construction', 'Real Estate', 'Marketing', 'Consulting', 'Legal', 'Media',
+      'Transportation', 'Energy', 'Agriculture', 'Food & Beverage', 'Tourism',
+      'Government', 'Non-profit', 'Entertainment', 'Sports', 'Fashion', 'Other'
+    ];
+    
+    if (!validIndustries.includes(industry)) {
+      return res.status(400).json({ 
+        error: "Please select a valid industry",
+        validIndustries: validIndustries
+      });
+    }
+
+    // Validate country against a basic list (you can expand this)
+    const validCountries = [
+      'United States', 'Canada', 'United Kingdom', 'Germany', 'France', 'Australia',
+      'India', 'Japan', 'China', 'Brazil', 'Mexico', 'Spain', 'Italy', 'Netherlands',
+      'Sweden', 'Norway', 'Denmark', 'South Africa', 'Singapore', 'New Zealand', 'Other'
+    ];
+    
+    if (!validCountries.includes(country)) {
+      return res.status(400).json({ 
+        error: "Please select a valid country",
+        validCountries: validCountries
+      });
     }
 
     // Ensure the password is a string
@@ -41,12 +84,15 @@ exports.register = async (req, res) => {
     const salt = await bcrypt.genSalt(10);
     const hashedPassword = await bcrypt.hash(password, salt);
 
-    // Create a new user
+    // Create a new user - UPDATED to include new fields
     const user = new User({
       name,
       username,
       email,
       password: hashedPassword,
+      companyName: companyName.trim(), // NEW
+      country: country.trim(), // NEW
+      industry: industry.trim(), // NEW
     });
 
     // Save the user to the database
@@ -73,14 +119,17 @@ exports.register = async (req, res) => {
     
     await sendVerificationEmail(email, verificationUrl, name);
 
-    // Respond with success message
+    // Respond with success message - UPDATED to include new fields
     res.status(201).json({ 
       message: "User registered successfully. Please check your email to verify your account. The link will expire in 15 minutes.",
       email: email,
       // Remove this debug info in production
       debug: {
         userId: user._id,
-        tokenExpires: new Date(tokenExpires).toISOString()
+        tokenExpires: new Date(tokenExpires).toISOString(),
+        companyName: user.companyName,
+        country: user.country,
+        industry: user.industry
       }
     });
   } catch (error) {

@@ -1,4 +1,4 @@
-// models/User.js - Updated for better OAuth support
+// models/User.js - Updated with new fields
 const mongoose = require('mongoose');
 const crypto = require('crypto');
 
@@ -25,6 +25,27 @@ const userSchema = new mongoose.Schema({
       return !this.googleId; // Only required if not a Google user
     }
   },
+  
+  // NEW FIELDS - Add these three fields
+  companyName: { 
+    type: String, 
+    required: true,
+    trim: true,
+    maxlength: 100
+  },
+  country: { 
+    type: String, 
+    required: true,
+    trim: true,
+    maxlength: 60
+  },
+  industry: { 
+    type: String, 
+    required: true,
+    trim: true,
+    maxlength: 50
+  },
+  
   isVerified: { type: Boolean, default: false },
   verificationToken: String,
   verificationTokenExpires: Date,
@@ -60,6 +81,8 @@ const userSchema = new mongoose.Schema({
 userSchema.index({ email: 1 });
 userSchema.index({ googleId: 1 });
 userSchema.index({ username: 1 });
+userSchema.index({ country: 1 }); // NEW INDEX for country queries
+userSchema.index({ industry: 1 }); // NEW INDEX for industry queries
 
 // Pre-save middleware
 userSchema.pre('save', function(next) {
@@ -85,13 +108,16 @@ userSchema.methods.canResetPassword = function() {
   return this.authProvider === 'local';
 };
 
-// Instance method to get safe user data
+// Instance method to get safe user data - UPDATED to include new fields
 userSchema.methods.toSafeObject = function() {
   return {
     _id: this._id,
     name: this.name,
     username: this.username,
     email: this.email,
+    companyName: this.companyName, // NEW
+    country: this.country, // NEW
+    industry: this.industry, // NEW
     isVerified: this.isVerified,
     authProvider: this.authProvider,
     photo: this.photo,

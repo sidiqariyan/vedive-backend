@@ -3,7 +3,12 @@ const express = require("express");
 const router = express.Router();
 const authController = require("../controllers/authController");
 const { authenticate } = require("../middleware/authMiddleware");
-
+router.get('/form-data', (req, res) => {
+  res.json({
+    industries: VALID_INDUSTRIES,
+    countries: VALID_COUNTRIES
+  });
+});
 // Basic auth routes
 router.post("/register", authController.register);
 router.post("/resend-verification", authController.resendVerification);
